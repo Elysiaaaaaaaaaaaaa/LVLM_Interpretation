@@ -15,7 +15,7 @@ from torch import nn
 import torchvision.transforms.functional as TF
 
 import numpy as np
-from utils import SubRegionDivision, mkdir
+from utils import mkdir
 
 from tqdm import tqdm
 
