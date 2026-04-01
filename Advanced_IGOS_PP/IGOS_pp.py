@@ -9,7 +9,7 @@ from qwen_vl_utils import process_vision_info
 OPENAI_CLIP_MEAN = [0.48145466, 0.4578275, 0.40821073]
 OPENAI_CLIP_STD  = [0.26862954, 0.26130258, 0.27577711]
 
-def pil_to_clip_tensor_bcwh(img, requires_grad=True, dtype=torch.float32, device=None):
+def pil_to_clip_tensor_bcwh(img, requires_grad=True, dtype=torch.float16, device=None):
     """
     将 PIL.Image 转为按 OpenAI CLIP 归一化的 tensor，维度为 [B, C, W, H]（B=1）。
     不进行 resize / crop；仅做 RGB 转换、[0,1] 归一化与标准化。
@@ -215,6 +215,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     # calculate init area
     pred_data = get_initial(pred_data, k=diverse_k, init_posi=init_posi, 
                            init_val=init_val, input_size=input_size, out_size=size)
+    
     for l_i, label in enumerate(pred_data['labels']):
         label = label.unsqueeze(0)
         keyword = pred_data['keywords']
@@ -244,6 +245,9 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
             )
         total_time += time.time() - now
         
+        # 清理内存
+        torch.cuda.empty_cache()
+    
         masks = masks[0,0].detach().cpu().numpy()
         masks -= np.min(masks)
         masks /= np.max(masks)
@@ -257,6 +261,16 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         superimposed_img = heatmap * 0.4 + original_image
         superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
         # cv2.imwrite("igos++.jpg", superimposed_img)
+    
+    # 释放不再使用的张量
+    inputs = None
+    inputs_blur = None
+    image_tensor = None
+    blur_tensor = None
+    input_ids = None
+    generated_ids = None
+    generated_ids_trimmed = None
+    torch.cuda.empty_cache()
         
     return masks, superimposed_img
 
@@ -420,8 +434,8 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
 def interval_score(model, inputs, generated_ids, images, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True, positions=None, processor=None):
     # if model_name == 'llava' or model_name == 'llava_next' or model_name == 'mgm':
     # The intervals to approximate the integral over
-    intervals = torch.linspace(1/num_iter, 1, num_iter, requires_grad=False).cuda().view(-1, 1, 1, 1)
-    interval_masks = up_masks.unsqueeze(1).to(model.device) * intervals.to(model.device)
+    intervals = torch.linspace(1/num_iter, 1, num_iter, requires_grad=False).to(model.device).view(-1, 1, 1, 1)
+    interval_masks = up_masks.unsqueeze(1) * intervals
     local_images = phi(images.unsqueeze(1), baseline.unsqueeze(1), interval_masks)
 
     if noise:
@@ -433,8 +447,6 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
 
     losses = torch.tensor(0.).to(model.device)
     for single_img in local_images:
-        # single_img = single_img.half()
-        
         if processor == None:
             single_input = single_img
         else:
@@ -462,7 +474,7 @@ def integrated_gradient(model, inputs, generated_ids, image, target_token_positi
         positions=positions,
         processor=processor)
     
-    loss.sum().backward(retain_graph=True)
+    loss.sum().backward()
     return loss.sum().item()
 
 def iGOS_pp(

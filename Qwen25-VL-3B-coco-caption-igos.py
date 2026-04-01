@@ -95,11 +95,11 @@ def main(args):
             os.path.join(save_npy_root_path, content["image_path"].replace(".jpg", ".npy")),
             np.array(heatmap)
         )
-        # 使用opencv展示热力图
-        cv2.imshow("Heatmap", superimposed_img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        # 保存热力图
         cv2.imwrite(os.path.join(save_vis_root_path, content["image_path"]), superimposed_img)
+        
+        # 清理内存
+        torch.cuda.empty_cache()
         
 if __name__ == "__main__":
     args = parse_args()
