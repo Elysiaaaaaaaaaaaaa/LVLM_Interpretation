@@ -46,7 +46,9 @@ def main(args):
     # Load Qwen2.5-VL
     # default: Load the model on the available device(s)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        "Qwen/Qwen2.5-VL-3B-Instruct", torch_dtype="auto", device_map="auto"
+        "Qwen/Qwen2.5-VL-3B-Instruct", 
+        torch_dtype=torch.float16, 
+        device_map="auto"
     )
     model.eval()
     
@@ -82,7 +84,7 @@ def main(args):
             continue
         
         image_path = os.path.join(args.Datasets, content["image_path"])
-        # text_prompt = content["question"]
+        text_prompt = content["question"]
         
         image = Image.open(image_path).convert('RGB')
         
@@ -93,7 +95,10 @@ def main(args):
             os.path.join(save_npy_root_path, content["image_path"].replace(".jpg", ".npy")),
             np.array(heatmap)
         )
-        
+        # 使用opencv展示热力图
+        cv2.imshow("Heatmap", superimposed_img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
         cv2.imwrite(os.path.join(save_vis_root_path, content["image_path"]), superimposed_img)
         
 if __name__ == "__main__":
