@@ -8,7 +8,7 @@ import json
 
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoTokenizer, AutoProcessor
 from qwen_vl_utils import process_vision_info
-
+from transformers import BitsAndBytesConfig
 import argparse
 import torch
 from torch import nn
@@ -42,12 +42,17 @@ def parse_args():
 
 def main(args):
     text_prompt = "Describe the image in one factual English sentence of no more than 20 words. Do not include information that is not clearly visible."
-    
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,              # 开启 4-bit 量化
+        bnb_4bit_compute_dtype=torch.float16, # 计算数据类型设为 fp16
+        bnb_4bit_quant_type="nf4",      # 量化格式
+        bnb_4bit_use_double_quant=True, # 二次量化，更省显存
+    )
     # Load Qwen2.5-VL
     # default: Load the model on the available device(s)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2.5-VL-3B-Instruct", 
-        load_in_4bit=True,
+        quantization_config=quantization_config,
         torch_dtype=torch.float16, 
         device_map="auto"
     )
