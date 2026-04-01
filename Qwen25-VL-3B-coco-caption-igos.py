@@ -47,6 +47,7 @@ def main(args):
     # default: Load the model on the available device(s)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2.5-VL-3B-Instruct", 
+        load_in_4bit=True,
         torch_dtype=torch.float16, 
         device_map="auto"
     )
