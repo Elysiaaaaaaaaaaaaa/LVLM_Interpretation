@@ -1,7 +1,7 @@
 sudo pip3 uninstall flash-attn timm
 
 pip3 install -e ".[train]"
-pip3 install flash-attn --no-build-isolation
+# pip3 install flash-attn --no-build-isolation
 pip3 install ipdb tensorboard openai openpyxl datasets pytesseract decord mamba-ssm causal-conv1d
 pip3 install -U pillow
 
