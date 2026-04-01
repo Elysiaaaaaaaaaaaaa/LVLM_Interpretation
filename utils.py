@@ -431,3 +431,14 @@ def find_keywords(args, model, input_ids, output_ids, image, blur_image, image_s
             keywords = [tokenizer.decode(output_ids[0][idx]).strip() for idx in positions]
     
     return positions, keywords
+
+
+def mkdir(path):
+    """
+    Create directory if it doesn't exist
+    
+    :param path: Path to directory
+    :return: None
+    """
+    if not os.path.exists(path):
+        os.makedirs(path)
