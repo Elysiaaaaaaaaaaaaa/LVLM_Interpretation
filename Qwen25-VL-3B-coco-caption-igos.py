@@ -107,7 +107,8 @@ def main(args):
         cv2.imwrite(os.path.join(save_vis_root_path, content["image_path"]), superimposed_img)
         
         # 清理内存
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
 if __name__ == "__main__":
     args = parse_args()

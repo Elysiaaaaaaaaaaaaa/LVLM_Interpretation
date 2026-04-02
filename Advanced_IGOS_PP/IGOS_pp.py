@@ -246,7 +246,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         total_time += time.time() - now
         
         # 清理内存
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     
         masks = masks[0,0].detach().cpu().numpy()
         masks -= np.min(masks)
@@ -270,7 +271,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     input_ids = None
     generated_ids = None
     generated_ids_trimmed = None
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
         
     return masks, superimposed_img
 
@@ -546,11 +548,12 @@ def iGOS_pp(
         loss += ins_loss_function(up_masks[:, 0] * up_masks[:, 1], indices)
         return loss + regularization_loss(image[indices], masks[:, 0] * masks[:, 1])
 
-    masks_del = torch.ones((1, 1, size, size), dtype=torch.float32, device='cuda')
-    masks_del = masks_del * init_mask.cuda()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    masks_del = torch.ones((1, 1, size, size), dtype=torch.float32, device=device)
+    masks_del = masks_del * init_mask.to(device)
     masks_del = Variable(masks_del, requires_grad=True)
-    masks_ins = torch.ones((image.shape[0], 1, size, size), dtype=torch.float32, device='cuda')
-    masks_ins = masks_ins * init_mask.cuda()
+    masks_ins = torch.ones((image.shape[0], 1, size, size), dtype=torch.float32, device=device)
+    masks_ins = masks_ins * init_mask.to(device)
     masks_ins = Variable(masks_ins, requires_grad=True)
     prompt = kwargs.get('prompt', None)
     image_size = kwargs.get('image_size', None)
@@ -559,8 +562,9 @@ def iGOS_pp(
 
     
     if opt == 'NAG':
-        cita_d=torch.zeros(1).cuda()
-        cita_i=torch.zeros(1).cuda()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        cita_d=torch.zeros(1).to(device)
+        cita_i=torch.zeros(1).to(device)
     
     prompt = kwargs.get('prompt', None)
     image_size = kwargs.get('image_size', None)
