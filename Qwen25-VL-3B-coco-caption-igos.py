@@ -2,6 +2,8 @@ import os
 # Set the huggingface mirror and cache path
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com" # for Chinese
 os.environ["HF_HOME"] = "./model_checkpoint/hf_cache"
+# 缓解显存碎片化问题
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import cv2
 import json
