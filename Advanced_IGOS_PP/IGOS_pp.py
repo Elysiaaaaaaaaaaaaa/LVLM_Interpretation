@@ -125,19 +125,33 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     image = image.resize((new_width, new_height), Image.BICUBIC)
     
     input_size = (image.size[1], image.size[0])
+    # size=32
+    # opt = 'NAG'
+    # diverse_k = 1
+    # init_posi = 0
+    # init_val = 0.0
+    # L1 = 1.0
+    # L2 = 0.1
+    # gamma = 1.0
+    # L3 = 10.0
+    # momentum = 5
+    # ig_iter = 10
+    # iterations=10
+    # lr=1.0  # 降低学习率以防止梯度爆炸
+
     size=32
     opt = 'NAG'
     diverse_k = 1
     init_posi = 0
-    init_val = 0.0
+    init_val = 0.
     L1 = 1.0
     L2 = 0.1
     gamma = 1.0
     L3 = 10.0
     momentum = 5
     ig_iter = 10
-    iterations=10
-    lr=1e-4  # 降低学习率以防止梯度爆炸
+    iterations=5
+    lr=10
     
     method = iGOS_pp
     
