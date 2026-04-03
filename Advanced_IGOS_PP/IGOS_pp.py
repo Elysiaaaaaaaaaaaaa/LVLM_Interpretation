@@ -137,7 +137,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     momentum = 5
     ig_iter = 10
     iterations=10
-    lr=0.01
+    lr=0.001  # 降低学习率以防止梯度爆炸
     
     method = iGOS_pp
     
@@ -485,6 +485,8 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
         
         probs = pred_probs(model, inputs, generated_ids, single_input, target_token_position, selected_token_word_id, need_grad=True)
         #losses += probs[positions].mean()
+        # 添加数值稳定性处理，防止log(0)导致的梯度爆炸
+        probs = torch.clamp(probs, min=1e-7, max=1.0)
         losses += torch.log(probs)[positions].sum()
 
     return losses / num_iter
@@ -660,12 +662,12 @@ def iGOS_pp(
             total_grads = torch.cat((total_grads1.unsqueeze(1), total_grads2.unsqueeze(1)), 1)
             lrs = line_search(masks, total_grads, loss_function, lr)
             
-            torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=0.1)
             masks_del.data -= total_grads1 * lrs
             masks_ins.data -= total_grads2 * lrs
         
         if opt == 'NAG':
-            torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=0.1)
             e = i / (i + momentum)
             cita_d_p = cita_d
             cita_i_p = cita_i
