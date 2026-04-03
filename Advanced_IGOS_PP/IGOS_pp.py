@@ -1,6 +1,7 @@
 from torch.autograd import Variable
 from .methods_helper import *
 from .utils import *
+from PIL import Image
 
 from qwen_vl_utils import process_vision_info
 
@@ -104,6 +105,25 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         text_prompt (_type_): _description_
         device (_type_): _description_
     """
+    # 调整图片尺寸，保持原始宽高比，最大边长不超过512
+    max_size = 512
+    original_width, original_height = image.size
+    aspect_ratio = original_width / original_height
+    
+    if original_width > original_height:
+        new_width = min(max_size, original_width)
+        new_height = int(new_width / aspect_ratio)
+    else:
+        new_height = min(max_size, original_height)
+        new_width = int(new_height * aspect_ratio)
+    
+    # 确保尺寸是28的倍数
+    new_width = round(new_width / 28) * 28
+    new_height = round(new_height / 28) * 28
+    
+    # 调整图片尺寸
+    image = image.resize((new_width, new_height), Image.BICUBIC)
+    
     input_size = (image.size[1], image.size[0])
     size=32
     opt = 'NAG'
