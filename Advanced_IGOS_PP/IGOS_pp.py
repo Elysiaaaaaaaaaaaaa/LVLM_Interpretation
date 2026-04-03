@@ -143,12 +143,12 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     opt = 'NAG'
     diverse_k = 1
     init_posi = 0
-    init_val = 0.5
+    init_val = 0.1
     L1 = 1.0
     L2 = 0.1
     gamma = 1.0
     L3 = 10.0
-    momentum = 0.8
+    momentum = 10
     ig_iter = 10
     iterations=100
     lr=0.1
