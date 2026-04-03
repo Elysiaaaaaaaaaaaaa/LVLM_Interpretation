@@ -148,7 +148,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     L2 = 0.1
     gamma = 1.0
     L3 = 10.0
-    momentum = 10
+    momentum = 0.8
     ig_iter = 10
     iterations=100
     lr=0.1
@@ -502,8 +502,8 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
         # 添加数值稳定性处理，防止log(0)导致的梯度爆炸
         probs = torch.clamp(probs, min=1e-7, max=1.0)
         
-        if idx == 0:
-            print(f"[interval_score] probs range: [{probs.min().item():.2e}, {probs.max().item():.2e}]")
+        # if idx == 0:
+        #     print(f"[interval_score] probs range: [{probs.min().item():.2e}, {probs.max().item():.2e}]")
         
         losses += torch.log(probs)[positions].sum()
 
@@ -525,14 +525,14 @@ def integrated_gradient(model, inputs, generated_ids, image, target_token_positi
         positions=positions,
         processor=processor)
     
-    print(f"[integrated_gradient] loss before backward: {loss.item():.4e}")
+    # print(f"[integrated_gradient] loss before backward: {loss.item():.4e}")
     
     loss.sum().backward()
     
-    if up_masks.grad is not None:
-        grad_norm = up_masks.grad.norm().item()
-        grad_max = up_masks.grad.abs().max().item()
-        print(f"[integrated_gradient] up_masks grad norm: {grad_norm:.4e}, max: {grad_max:.4e}")
+    # if up_masks.grad is not None:
+    #     grad_norm = up_masks.grad.norm().item()
+    #     grad_max = up_masks.grad.abs().max().item()
+    #     print(f"[integrated_gradient] up_masks grad norm: {grad_norm:.4e}, max: {grad_max:.4e}")
     
     return loss.sum().item()
 
@@ -675,7 +675,7 @@ def iGOS_pp(
         total_grads1 /= 2
         total_grads2 /= 2
         
-        print(f"[iGOS_pp] iter {i}: total_grads1 norm={total_grads1.norm().item():.4e}, total_grads2 norm={total_grads2.norm().item():.4e}")
+        # print(f"[iGOS_pp] iter {i}: total_grads1 norm={total_grads1.norm().item():.4e}, total_grads2 norm={total_grads2.norm().item():.4e}")
 
         # Computer regularization for combined masks
         L2 = exp_decay(L2, i, gamma)
@@ -683,8 +683,8 @@ def iGOS_pp(
         losses = loss_l1 + loss_tv + loss_l2
         losses.sum().backward()
         
-        if masks_del.grad is not None:
-            print(f"[iGOS_pp] iter {i}: reg grad norm del={masks_del.grad.norm().item():.4e}, ins={masks_ins.grad.norm().item():.4e}")
+        # if masks_del.grad is not None:
+        #     print(f"[iGOS_pp] iter {i}: reg grad norm del={masks_del.grad.norm().item():.4e}, ins={masks_ins.grad.norm().item():.4e}")
         
         total_grads1 += masks_del.grad.clone()
         total_grads2 += masks_ins.grad.clone()
