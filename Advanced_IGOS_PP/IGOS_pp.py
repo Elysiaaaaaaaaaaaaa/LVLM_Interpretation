@@ -129,7 +129,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     opt = 'NAG'
     diverse_k = 1
     init_posi = 0
-    init_val = 0.1
+    init_val = 0.6
     L1 = 1.0
     L2 = 0.1
     gamma = 1.0
@@ -137,7 +137,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     momentum = 5
     ig_iter = 10
     iterations=10
-    lr=0.001  # 降低学习率以防止梯度爆炸
+    lr=1e-4  # 降低学习率以防止梯度爆炸
     
     method = iGOS_pp
     
