@@ -659,10 +659,13 @@ def iGOS_pp(
             masks = torch.cat((masks_del.unsqueeze(1), masks_ins.unsqueeze(1)), 1)
             total_grads = torch.cat((total_grads1.unsqueeze(1), total_grads2.unsqueeze(1)), 1)
             lrs = line_search(masks, total_grads, loss_function, lr)
+            
+            torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=1.0)
             masks_del.data -= total_grads1 * lrs
             masks_ins.data -= total_grads2 * lrs
         
         if opt == 'NAG':
+            torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=1.0)
             e = i / (i + momentum)
             cita_d_p = cita_d
             cita_i_p = cita_i
