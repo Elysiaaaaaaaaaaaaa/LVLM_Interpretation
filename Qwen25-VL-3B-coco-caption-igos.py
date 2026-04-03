@@ -99,13 +99,18 @@ def main(args):
         
         heatmap, superimposed_img = explainer(model, processor, image, text_prompt, tokenizer)
 
+        # 确保保存目录存在
+        npy_save_path = os.path.join(save_npy_root_path, content["image_path"].replace(".jpg", ".npy"))
+        vis_save_path = os.path.join(save_vis_root_path, content["image_path"])
+        
+        # 创建必要的子目录
+        os.makedirs(os.path.dirname(npy_save_path), exist_ok=True)
+        os.makedirs(os.path.dirname(vis_save_path), exist_ok=True)
+        
         # Save npy file
-        np.save(
-            os.path.join(save_npy_root_path, content["image_path"].replace(".jpg", ".npy")),
-            np.array(heatmap)
-        )
+        np.save(npy_save_path, np.array(heatmap))
         # 保存热力图
-        cv2.imwrite(os.path.join(save_vis_root_path, content["image_path"]), superimposed_img)
+        cv2.imwrite(vis_save_path, superimposed_img)
         
         # 清理内存
         if torch.cuda.is_available():

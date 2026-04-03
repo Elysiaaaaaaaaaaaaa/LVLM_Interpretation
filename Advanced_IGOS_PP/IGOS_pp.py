@@ -270,12 +270,21 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
             torch.cuda.empty_cache()
     
         masks = masks[0,0].detach().cpu().numpy()
-        masks -= np.min(masks)
-        masks /= np.max(masks)
+        # 避免除以零导致的 NaN
+        mask_min = np.min(masks)
+        mask_max = np.max(masks)
+        if mask_max > mask_min:
+            masks -= mask_min
+            masks /= (mask_max - mask_min)
+        else:
+            # 如果所有值都相同，设置为默认值
+            masks = np.zeros_like(masks)
         
         image = np.array(image)
         masks = cv2.resize(masks, (image.shape[1], image.shape[0]))
         
+        # 确保 masks 中没有 NaN 值
+        masks = np.nan_to_num(masks, nan=0.0)
         heatmap = np.uint8(255 * (1-masks))  
         heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
         original_image = image
@@ -597,30 +606,42 @@ def iGOS_pp(
         # Compute the integrated gradient for the combined mask, optimized for deletion
         loss_comb_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor)
         
-        total_grads1 = masks_del.grad.clone()
-        total_grads2 = masks_ins.grad.clone()
-        masks_del.grad.zero_()
-        masks_ins.grad.zero_()
+        # 确保梯度存在
+        if masks_del.grad is not None and masks_ins.grad is not None:
+            total_grads1 = masks_del.grad.clone()
+            total_grads2 = masks_ins.grad.clone()
+            masks_del.grad.zero_()
+            masks_ins.grad.zero_()
+        else:
+            # 如果梯度不存在，使用零梯度
+            total_grads1 = torch.zeros_like(masks_del)
+            total_grads2 = torch.zeros_like(masks_ins)
 
         # Compute the integrated gradient for the combined mask, optimized for insertion
         loss_comb_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor)
         
-        total_grads1 -= masks_del.grad.clone()  # Negative because insertion loss is 1 - score.
-        total_grads2 -= masks_ins.grad.clone()
-        masks_del.grad.zero_()
-        masks_ins.grad.zero_()
+        # 确保梯度存在
+        if masks_del.grad is not None and masks_ins.grad is not None:
+            total_grads1 -= masks_del.grad.clone()  # Negative because insertion loss is 1 - score.
+            total_grads2 -= masks_ins.grad.clone()
+            masks_del.grad.zero_()
+            masks_ins.grad.zero_()
 
         # Compute the integrated gradient for the deletion mask
         loss_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1, ig_iter, positions=positions, processor=processor)
         
-        total_grads1 += masks_del.grad.clone()
-        masks_del.grad.zero_()
+        # 确保梯度存在
+        if masks_del.grad is not None:
+            total_grads1 += masks_del.grad.clone()
+            masks_del.grad.zero_()
 
         # Compute the integrated graident for the insertion mask
         loss_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks2, ig_iter, positions=positions, processor=processor)
         
-        total_grads2 -= masks_ins.grad.clone()
-        masks_ins.grad.zero_()
+        # 确保梯度存在
+        if masks_ins.grad is not None:
+            total_grads2 -= masks_ins.grad.clone()
+            masks_ins.grad.zero_()
 
         # Average them to balance out the terms with the regularization terms
         total_grads1 /= 2
