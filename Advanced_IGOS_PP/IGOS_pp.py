@@ -129,15 +129,15 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     opt = 'NAG'
     diverse_k = 1
     init_posi = 0
-    init_val = 0.
+    init_val = 0.1
     L1 = 1.0
     L2 = 0.1
     gamma = 1.0
     L3 = 10.0
     momentum = 5
     ig_iter = 10
-    iterations=5
-    lr=10
+    iterations=10
+    lr=0.01
     
     method = iGOS_pp
     
@@ -200,7 +200,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
             **inputs, 
             do_sample=False,      # Disable sampling and use greedy search instead
             num_beams=1,          # Set to 1 to ensure greedy search instead of beam search.
-            max_new_tokens=20)
+            max_new_tokens=50)
         generated_ids_trimmed = [   # 去掉图像和prompt的文本
             out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
