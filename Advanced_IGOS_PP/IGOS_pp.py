@@ -511,34 +511,28 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
         # [DEBUG] Check single_input for NaN
         if torch.isnan(single_input).any():
             print(f"[NaN DEBUG] interval_score: single_input (iter {idx}) contains NaN after processor!")
+            # [FIX] Replace NaN with zeros
+            single_input = torch.nan_to_num(single_input, nan=0.0)
         
-        probs = pred_probs(model, inputs, generated_ids, single_input, target_token_position, selected_token_word_id, need_grad=True)
-        
-        # [DEBUG] Check probs for NaN
-        if torch.isnan(probs).any():
-            print(f"[NaN DEBUG] interval_score: probs (iter {idx}) contain NaN!")
-            print(f"  positions: {positions}")
-        
-        #losses += probs[positions].mean()
-        # 添加数值稳定性处理，防止log(0)导致的梯度爆炸
-        probs = torch.clamp(probs, min=1e-7, max=1.0)
-        
-        # if idx == 0:
-        #     print(f"[interval_score] probs range: [{probs.min().item():.2e}, {probs.max().item():.2e}]")
-        
-        log_probs = torch.log(probs)
+        # [FIX] Use return_log_probs=True for better numerical stability
+        log_probs = pred_probs(model, inputs, generated_ids, single_input, target_token_position, selected_token_word_id, need_grad=True, return_log_probs=True)
         
         # [DEBUG] Check log_probs for NaN
         if torch.isnan(log_probs).any():
             print(f"[NaN DEBUG] interval_score: log_probs (iter {idx}) contain NaN!")
-            print(f"  This means probs had values <= 0 before clamp (should not happen after clamp)")
+            print(f"  positions: {positions}")
+            # [FIX] Replace NaN with a large negative value (equivalent to very small prob)
+            log_probs = torch.nan_to_num(log_probs, nan=-20.0)
+        
+        # [FIX] Clamp log_probs to prevent extreme values
+        log_probs = torch.clamp(log_probs, min=-20.0, max=0.0)
         
         losses += log_probs[positions].sum()
         
         # [DEBUG] Check losses for NaN
         if torch.isnan(losses):
             print(f"[NaN DEBUG] interval_score: losses became NaN at iteration {idx}!")
-            print(f"  positions: {positions}, positions valid range: [0, {probs.shape[0]-1}]")
+            print(f"  positions: {positions}, positions valid range: [0, {log_probs.shape[0]-1}]")
             break
 
     final_loss = losses / num_iter

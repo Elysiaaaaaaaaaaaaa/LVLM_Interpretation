@@ -339,7 +339,7 @@ def score_output(args, image, image_size, model, model_name, l, label, prompt, p
     scores = probs_pred[:, torch.tensor(positions).to(probs_pred.device)].sum(-1) 
     return scores / len(positions)
 
-def pred_probs(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, need_grad=False):
+def pred_probs(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, need_grad=False, return_log_probs=False):
     inputs_new = inputs.copy()
     
     inputs_new['input_ids'] = generated_ids
@@ -352,6 +352,9 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
     if torch.isnan(image).any():
         print(f"[NaN DEBUG] pred_probs: input image contains NaN!")
         print(f"  image shape: {image.shape}, NaN count: {torch.isnan(image).sum().item()}")
+        # [FIX] Replace NaN with zeros to prevent propagation
+        image = torch.nan_to_num(image, nan=0.0)
+        inputs_new['pixel_values'] = image
     
     # Forward calculation to get all logits (including the logits of the input part)
     if need_grad:
@@ -374,7 +377,10 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
     if torch.isnan(all_logits).any():
         print(f"[NaN DEBUG] pred_probs: model output logits contain NaN!")
         print(f"  all_logits shape: {all_logits.shape}, NaN count: {torch.isnan(all_logits).sum().item()}")
-        print(f"  logits range: [{all_logits[~torch.isnan(all_logits)].min().item():.4f}, {all_logits[~torch.isnan(all_logits)].max().item():.4f}]")
+        if not torch.isnan(all_logits).all():
+            print(f"  logits range: [{all_logits[~torch.isnan(all_logits)].min().item():.4f}, {all_logits[~torch.isnan(all_logits)].max().item():.4f}]")
+        # [FIX] Replace NaN with zeros to prevent propagation
+        all_logits = torch.nan_to_num(all_logits, nan=0.0)
     
     returned_logits = all_logits[:, target_token_position - 1] # The reason for the minus 1 is that the generated content is in the previous position
     
@@ -383,11 +389,15 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
         print(f"[NaN DEBUG] pred_probs: returned_logits (selected position) contain NaN!")
         print(f"  target_token_position: {target_token_position}")
     
-    returned_logits = F.softmax(returned_logits, dim=-1)
+    # [FIX] Use log_softmax for better numerical stability
+    if return_log_probs:
+        returned_logits = F.log_softmax(returned_logits, dim=-1)
+    else:
+        returned_logits = F.softmax(returned_logits, dim=-1)
     
     # [DEBUG] Check softmax output for NaN
     if torch.isnan(returned_logits).any():
-        print(f"[NaN DEBUG] pred_probs: softmax output contains NaN!")
+        print(f"[NaN DEBUG] pred_probs: softmax/log_softmax output contains NaN!")
         print(f"  This usually means logits had extreme values (overflow/underflow)")
     
     selected_token_word_id = torch.tensor(selected_token_word_id).to(model.device)
