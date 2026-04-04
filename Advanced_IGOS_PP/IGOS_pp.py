@@ -300,10 +300,15 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         
         # 确保 masks 中没有 NaN 值
         masks = np.nan_to_num(masks, nan=0.0)
+        
+        # 增强mask对比度，让重要区域更突出
+        gamma = 0.6
+        masks = np.power(masks, gamma)
+        
         heatmap = np.uint8(255 * (1-masks))  
-        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_HOT)
+        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
         original_image = image
-        superimposed_img = heatmap * 0.6 + original_image * 0.4
+        superimposed_img = heatmap * 0.35 + original_image * 0.65
         superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
         # cv2.imwrite("igos++.jpg", superimposed_img)
     
