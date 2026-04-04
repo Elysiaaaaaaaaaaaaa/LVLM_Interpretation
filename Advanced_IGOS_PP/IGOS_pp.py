@@ -144,14 +144,14 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     opt = 'NAG'
     diverse_k = 1
     init_posi = 0
-    init_val = 0.1
+    init_val = 0.4
     L1 = 3.0
     L2 = 0.05
     gamma = 1.0
     L3 = 10.0
     momentum = 8
     ig_iter = 10
-    iterations=50
+    iterations=30
     lr=0.1
     
     method = iGOS_pp
@@ -302,8 +302,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         masks = np.nan_to_num(masks, nan=0.0)
         
         # 增强mask对比度，让重要区域更突出
-        gamma = 0.6
-        masks = np.power(masks, gamma)
+        vis_gamma = 0.4
+        masks = np.power(masks, vis_gamma)
         
         heatmap = np.uint8(255 * (1-masks))  
         heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
