@@ -152,7 +152,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     momentum = 8
     ig_iter = 10
     iterations=30
-    lr=0.05
+    lr=0.1
     
     method = iGOS_pp
     
@@ -301,9 +301,9 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         # 确保 masks 中没有 NaN 值
         masks = np.nan_to_num(masks, nan=0.0)
         heatmap = np.uint8(255 * (1-masks))  
-        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_HOT)
         original_image = image
-        superimposed_img = heatmap * 0.4 + original_image
+        superimposed_img = heatmap * 0.6 + original_image * 0.4
         superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
         # cv2.imwrite("igos++.jpg", superimposed_img)
     
