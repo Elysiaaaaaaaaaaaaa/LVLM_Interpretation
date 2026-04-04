@@ -149,7 +149,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     L2 = 0.5
     gamma = 1.0
     L3 = 10.0
-    momentum = 8
+    momentum = 0.8
     ig_iter = 10
     iterations=30
     lr=0.05
