@@ -146,13 +146,13 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     init_posi = 0
     init_val = 0.4
     L1 = 1.0
-    L2 = 2.0
+    L2 = 5.0
     gamma = 1.0
     L3 = 10.0
     momentum = 0.8
     ig_iter = 10
     iterations=30
-    lr=0.05
+    lr=0.02
     
     method = iGOS_pp
     
