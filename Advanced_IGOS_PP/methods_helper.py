@@ -348,6 +348,11 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
     inputs_new['pixel_values'] = image
     inputs_new = inputs_new.to(model.device)
     
+    # [DEBUG] Check input image for NaN
+    if torch.isnan(image).any():
+        print(f"[NaN DEBUG] pred_probs: input image contains NaN!")
+        print(f"  image shape: {image.shape}, NaN count: {torch.isnan(image).sum().item()}")
+    
     # Forward calculation to get all logits (including the logits of the input part)
     if need_grad:
         outputs = model(
@@ -365,14 +370,36 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
             )
             all_logits = outputs.logits  # [batch_size, seq_len, vocab_size]
     
+    # [DEBUG] Check model output logits for NaN
+    if torch.isnan(all_logits).any():
+        print(f"[NaN DEBUG] pred_probs: model output logits contain NaN!")
+        print(f"  all_logits shape: {all_logits.shape}, NaN count: {torch.isnan(all_logits).sum().item()}")
+        print(f"  logits range: [{all_logits[~torch.isnan(all_logits)].min().item():.4f}, {all_logits[~torch.isnan(all_logits)].max().item():.4f}]")
+    
     returned_logits = all_logits[:, target_token_position - 1] # The reason for the minus 1 is that the generated content is in the previous position
+    
+    # [DEBUG] Check selected logits for NaN
+    if torch.isnan(returned_logits).any():
+        print(f"[NaN DEBUG] pred_probs: returned_logits (selected position) contain NaN!")
+        print(f"  target_token_position: {target_token_position}")
+    
     returned_logits = F.softmax(returned_logits, dim=-1)
+    
+    # [DEBUG] Check softmax output for NaN
+    if torch.isnan(returned_logits).any():
+        print(f"[NaN DEBUG] pred_probs: softmax output contains NaN!")
+        print(f"  This usually means logits had extreme values (overflow/underflow)")
     
     selected_token_word_id = torch.tensor(selected_token_word_id).to(model.device)
     indices = selected_token_word_id.unsqueeze(0).unsqueeze(-1) # [1, N, 1]
     
     returned_logits = returned_logits.gather(dim=2, index=indices) # [1, N, 1]
     returned_logits = returned_logits.squeeze(-1)  # [1, N]
+    
+    # [DEBUG] Final check before return
+    if torch.isnan(returned_logits).any():
+        print(f"[NaN DEBUG] pred_probs: final returned_logits contain NaN!")
+        print(f"  selected_token_word_id: {selected_token_word_id}")
     
     return returned_logits[0]
 
@@ -381,6 +408,20 @@ def find_keywords(model, inputs, generated_ids, output_ids, image, blur_image, t
     # full_prompt = torch.cat((input_ids, output_ids), dim=1)
     probs = pred_probs(model, inputs, generated_ids, image, target_token_position, selected_token_word_id)
     probs_blur = pred_probs(model, inputs, generated_ids, blur_image, target_token_position, selected_token_word_id)
+
+    # [DEBUG] Check probs for NaN before log
+    if torch.isnan(probs).any():
+        print(f"[NaN DEBUG] find_keywords: probs contain NaN!")
+    if torch.isnan(probs_blur).any():
+        print(f"[NaN DEBUG] find_keywords: probs_blur contain NaN!")
+    
+    # [DEBUG] Check for zero values that would cause log(0) = -inf
+    if (probs <= 0).any():
+        print(f"[NaN DEBUG] find_keywords: probs contain zero or negative values, log will produce -inf")
+        print(f"  zero count: {(probs <= 0).sum().item()}, min: {probs.min().item():.2e}")
+    if (probs_blur <= 0).any():
+        print(f"[NaN DEBUG] find_keywords: probs_blur contain zero or negative values, log will produce -inf")
+        print(f"  zero count: {(probs_blur <= 0).sum().item()}, min: {probs_blur.min().item():.2e}")
 
     # condition = (probs_blur <= 0.4*probs) & (~torch.isin(output_ids[0], torch.tensor(special_ids).to(probs.device)))
     condition = (torch.log(probs)-torch.log(probs_blur) > 1.0)& (probs>=0.0) & (~torch.isin(output_ids[0], torch.tensor(special_ids).to(probs.device)))

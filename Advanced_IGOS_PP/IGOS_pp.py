@@ -1,3 +1,4 @@
+import math
 from torch.autograd import Variable
 from .methods_helper import *
 from .utils import *
@@ -483,6 +484,16 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
     interval_masks = up_masks.unsqueeze(1) * intervals
     local_images = phi(images.unsqueeze(1), baseline.unsqueeze(1), interval_masks)
 
+    # [DEBUG] Check up_masks for NaN
+    if torch.isnan(up_masks).any():
+        print(f"[NaN DEBUG] interval_score: up_masks contain NaN!")
+        print(f"  up_masks shape: {up_masks.shape}, NaN count: {torch.isnan(up_masks).sum().item()}")
+    
+    # [DEBUG] Check local_images for NaN after phi
+    if torch.isnan(local_images).any():
+        print(f"[NaN DEBUG] interval_score: local_images contain NaN after phi()!")
+        print(f"  local_images shape: {local_images.shape}, NaN count: {torch.isnan(local_images).sum().item()}")
+
     if noise:
         local_images = local_images + torch.randn_like(local_images) * .2
 
@@ -497,7 +508,17 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
         else:
             single_input = processor(single_img)
         
+        # [DEBUG] Check single_input for NaN
+        if torch.isnan(single_input).any():
+            print(f"[NaN DEBUG] interval_score: single_input (iter {idx}) contains NaN after processor!")
+        
         probs = pred_probs(model, inputs, generated_ids, single_input, target_token_position, selected_token_word_id, need_grad=True)
+        
+        # [DEBUG] Check probs for NaN
+        if torch.isnan(probs).any():
+            print(f"[NaN DEBUG] interval_score: probs (iter {idx}) contain NaN!")
+            print(f"  positions: {positions}")
+        
         #losses += probs[positions].mean()
         # 添加数值稳定性处理，防止log(0)导致的梯度爆炸
         probs = torch.clamp(probs, min=1e-7, max=1.0)
@@ -505,9 +526,29 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
         # if idx == 0:
         #     print(f"[interval_score] probs range: [{probs.min().item():.2e}, {probs.max().item():.2e}]")
         
-        losses += torch.log(probs)[positions].sum()
+        log_probs = torch.log(probs)
+        
+        # [DEBUG] Check log_probs for NaN
+        if torch.isnan(log_probs).any():
+            print(f"[NaN DEBUG] interval_score: log_probs (iter {idx}) contain NaN!")
+            print(f"  This means probs had values <= 0 before clamp (should not happen after clamp)")
+        
+        losses += log_probs[positions].sum()
+        
+        # [DEBUG] Check losses for NaN
+        if torch.isnan(losses):
+            print(f"[NaN DEBUG] interval_score: losses became NaN at iteration {idx}!")
+            print(f"  positions: {positions}, positions valid range: [0, {probs.shape[0]-1}]")
+            break
 
-    return losses / num_iter
+    final_loss = losses / num_iter
+    
+    # [DEBUG] Check final loss for NaN
+    if torch.isnan(final_loss):
+        print(f"[NaN DEBUG] interval_score: final_loss is NaN!")
+        print(f"  num_iter: {num_iter}")
+    
+    return final_loss
 
 
 def integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True,  positions=None,processor=None):
@@ -525,16 +566,34 @@ def integrated_gradient(model, inputs, generated_ids, image, target_token_positi
         positions=positions,
         processor=processor)
     
+    # [DEBUG] Check loss for NaN before backward
+    if torch.isnan(loss):
+        print(f"[NaN DEBUG] integrated_gradient: loss is NaN before backward!")
+        print(f"  up_masks range: [{up_masks.min().item():.4f}, {up_masks.max().item():.4f}]")
+        print(f"  num_iter: {num_iter}, positions: {positions}")
+        return float('nan')
+    
     # print(f"[integrated_gradient] loss before backward: {loss.item():.4e}")
     
     loss.sum().backward()
     
-    # if up_masks.grad is not None:
-    #     grad_norm = up_masks.grad.norm().item()
-    #     grad_max = up_masks.grad.abs().max().item()
-    #     print(f"[integrated_gradient] up_masks grad norm: {grad_norm:.4e}, max: {grad_max:.4e}")
+    # [DEBUG] Check gradient for NaN after backward
+    if up_masks.grad is not None:
+        if torch.isnan(up_masks.grad).any():
+            print(f"[NaN DEBUG] integrated_gradient: up_masks.grad contains NaN after backward!")
+            print(f"  grad NaN count: {torch.isnan(up_masks.grad).sum().item()}")
+        # if up_masks.grad is not None:
+        #     grad_norm = up_masks.grad.norm().item()
+        #     grad_max = up_masks.grad.abs().max().item()
+        #     print(f"[integrated_gradient] up_masks grad norm: {grad_norm:.4e}, max: {grad_max:.4e}")
     
-    return loss.sum().item()
+    loss_value = loss.sum().item()
+    
+    # [DEBUG] Final check
+    if math.isnan(loss_value):
+        print(f"[NaN DEBUG] integrated_gradient: final loss_value is NaN!")
+    
+    return loss_value
 
 def iGOS_pp(
         model,
@@ -631,8 +690,25 @@ def iGOS_pp(
         up_masks1 = upscale(masks_del, image)
         up_masks2 = upscale(masks_ins, image)
 
+        # [DEBUG] Check up_masks for NaN before integrated_gradient
+        if torch.isnan(up_masks1).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: up_masks1 contains NaN!")
+        if torch.isnan(up_masks2).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: up_masks2 contains NaN!")
+        
+        combined_mask = up_masks1 * up_masks2
+        if torch.isnan(combined_mask).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: combined_mask (up_masks1 * up_masks2) contains NaN!")
+
         # Compute the integrated gradient for the combined mask, optimized for deletion
         loss_comb_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor)
+        
+        # [DEBUG] Check loss_comb_del for NaN
+        if math.isnan(loss_comb_del):
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: loss_comb_del is NaN!")
+            print(f"  This is the main loss causing the issue.")
+            print(f"  masks_del range: [{masks_del.min().item():.4f}, {masks_del.max().item():.4f}]")
+            print(f"  masks_ins range: [{masks_ins.min().item():.4f}, {masks_ins.max().item():.4f}]")
         
         # 确保梯度存在
         if masks_del.grad is not None and masks_ins.grad is not None:
