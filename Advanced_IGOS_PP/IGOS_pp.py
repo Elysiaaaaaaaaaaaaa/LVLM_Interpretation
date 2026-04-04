@@ -145,7 +145,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     diverse_k = 1
     init_posi = 0
     init_val = 0.4
-    L1 = 1.0
+    L1 = 2.0
     L2 = 5.0
     gamma = 1.0
     L3 = 10.0
