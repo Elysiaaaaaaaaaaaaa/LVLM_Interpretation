@@ -46,7 +46,7 @@ def parse_args():
 def main(args):
     text_prompt = "Describe the image in one factual English sentence of no more than 20 words. Do not include information that is not clearly visible."
     quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,              # 开启 4-bit 量化
+        load_in_4bit=False,              # 开启 4-bit 量化
         bnb_4bit_compute_dtype=torch.float16, # 计算数据类型设为 fp16
         bnb_4bit_quant_type="nf4",      # 量化格式
         bnb_4bit_use_double_quant=True, # 二次量化，更省显存

@@ -751,19 +751,51 @@ def iGOS_pp(
         total_grads1 /= 2
         total_grads2 /= 2
         
+        # [DEBUG] Check total_grads for NaN before regularization
+        if torch.isnan(total_grads1).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads1 contains NaN before reg!")
+            print(f"  grad norm: {total_grads1.norm().item():.4e}")
+        if torch.isnan(total_grads2).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads2 contains NaN before reg!")
+            print(f"  grad norm: {total_grads2.norm().item():.4e}")
+        
         # print(f"[iGOS_pp] iter {i}: total_grads1 norm={total_grads1.norm().item():.4e}, total_grads2 norm={total_grads2.norm().item():.4e}")
 
         # Computer regularization for combined masks
         L2 = exp_decay(L2, i, gamma)
         loss_l1, loss_tv, loss_l2 = regularization_loss(image, masks_del * masks_ins)
+        
+        # [DEBUG] Check regularization losses for NaN
+        if torch.isnan(loss_l1).any() or torch.isnan(loss_tv).any() or torch.isnan(loss_l2).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: regularization loss contains NaN!")
+            print(f"  loss_l1: {loss_l1}, loss_tv: {loss_tv}, loss_l2: {loss_l2}")
+        
         losses = loss_l1 + loss_tv + loss_l2
+        
+        # [DEBUG] Check combined loss before backward
+        if torch.isnan(losses).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: combined loss (loss_l1+loss_tv+loss_l2) contains NaN before backward!")
+            print(f"  masks_del*masks_ins range: [{(masks_del * masks_ins).min().item():.4f}, {(masks_del * masks_ins).max().item():.4f}]")
+        
         losses.sum().backward()
+        
+        # [DEBUG] Check gradient from regularization for NaN
+        if masks_del.grad is not None and torch.isnan(masks_del.grad).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: masks_del.grad contains NaN after reg backward!")
+        if masks_ins.grad is not None and torch.isnan(masks_ins.grad).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: masks_ins.grad contains NaN after reg backward!")
         
         # if masks_del.grad is not None:
         #     print(f"[iGOS_pp] iter {i}: reg grad norm del={masks_del.grad.norm().item():.4e}, ins={masks_ins.grad.norm().item():.4e}")
         
         total_grads1 += masks_del.grad.clone()
         total_grads2 += masks_ins.grad.clone()
+        
+        # [DEBUG] Check total_grads after adding regularization gradient
+        if torch.isnan(total_grads1).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads1 contains NaN after adding reg grad!")
+        if torch.isnan(total_grads2).any():
+            print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads2 contains NaN after adding reg grad!")
 
         if opt == 'LS':
             masks = torch.cat((masks_del.unsqueeze(1), masks_ins.unsqueeze(1)), 1)
@@ -775,14 +807,59 @@ def iGOS_pp(
             masks_ins.data -= total_grads2 * lrs
         
         if opt == 'NAG':
+            # [DEBUG] Check total_grads before clip
+            if torch.isnan(total_grads1).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads1 contains NaN before clip!")
+            if torch.isnan(total_grads2).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads2 contains NaN before clip!")
+            
             torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=0.1)
+            
+            # [DEBUG] Check total_grads after clip (clip may not fix NaN)
+            if torch.isnan(total_grads1).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads1 STILL contains NaN after clip!")
+                print(f"  This is likely the ROOT CAUSE - gradients became NaN and clip cannot fix it")
+            if torch.isnan(total_grads2).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads2 STILL contains NaN after clip!")
+            
             e = i / (i + momentum)
             cita_d_p = cita_d
             cita_i_p = cita_i
+            
+            # [DEBUG] Check cita values before update
+            if i > 0 and torch.isnan(cita_d_p).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: cita_d_p (from prev iter) contains NaN!")
+            if i > 0 and torch.isnan(cita_i_p).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: cita_i_p (from prev iter) contains NaN!")
+            
             cita_d = masks_del.data - lr * total_grads1
             cita_i = masks_ins.data - lr * total_grads2
-            masks_del.data = cita_d + e * (cita_d - cita_d_p)
-            masks_ins.data = cita_i + e * (cita_i - cita_i_p)
+            
+            # [DEBUG] Check cita after gradient step
+            if torch.isnan(cita_d).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: cita_d contains NaN after gradient step!")
+                print(f"  masks_del.data range: [{masks_del.data.min().item():.4f}, {masks_del.data.max().item():.4f}]")
+                print(f"  lr: {lr}, total_grads1 range: [{total_grads1.min().item():.4e}, {total_grads1.max().item():.4e}]")
+            if torch.isnan(cita_i).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: cita_i contains NaN after gradient step!")
+            
+            momentum_term_d = cita_d - cita_d_p
+            momentum_term_i = cita_i - cita_i_p
+            
+            # [DEBUG] Check momentum term
+            if torch.isnan(momentum_term_d).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: momentum_term_d (cita_d - cita_d_p) contains NaN!")
+            if torch.isnan(momentum_term_i).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: momentum_term_i (cita_i - cita_i_p) contains NaN!")
+            
+            masks_del.data = cita_d + e * momentum_term_d
+            masks_ins.data = cita_i + e * momentum_term_i
+            
+            # [DEBUG] Final check after NAG update
+            if torch.isnan(masks_del.data).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: masks_del.data contains NaN after NAG update!")
+            if torch.isnan(masks_ins.data).any():
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: masks_ins.data contains NaN after NAG update!")
 
         masks_del.grad.zero_()
         masks_ins.grad.zero_()
