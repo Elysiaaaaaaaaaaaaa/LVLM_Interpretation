@@ -107,7 +107,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         device (_type_): _description_
     """
     # 调整图片尺寸，保持原始宽高比，最大边长不超过512
-    max_size = 512
+    max_size = 224
     original_width, original_height = image.size
     aspect_ratio = original_width / original_height
     
@@ -145,14 +145,14 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     diverse_k = 1
     init_posi = 0
     init_val = 0.3
-    L1 = 1
-    L2 = 20
+    L1 = 0.1
+    L2 = 100
     gamma = 1.0
-    L3 = 10.0
+    L3 = 50.0
     momentum = 0.8
     ig_iter = 10
-    iterations=25
-    lr=0.05
+    iterations=50
+    lr=0.005
     
     method = iGOS_pp
     
