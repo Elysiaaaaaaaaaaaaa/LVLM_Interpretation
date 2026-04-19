@@ -33,3 +33,4 @@ weights
 
 .ipynb_checkpoints
 *.ipynb
+scripts/
