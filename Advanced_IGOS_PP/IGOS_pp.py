@@ -107,7 +107,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         device (_type_): _description_
     """
     # 调整图片尺寸，保持原始宽高比，最大边长不超过512
-    max_size = 336
+    max_size = 512
     original_width, original_height = image.size
     aspect_ratio = original_width / original_height
     
