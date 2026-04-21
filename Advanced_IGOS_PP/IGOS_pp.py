@@ -233,7 +233,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
             generated_ids_trimmed[0], skip_special_tokens=True, clean_up_tokenization_spaces=False
         )[positions[0]]
     
-    print(keywords)
+    print(f"[Model Raw Output] {output_text[0] if len(output_text) > 0 else ''}")
+    print(f"[Selected Keywords] {keywords}")
     
     if select_word_id != None:
         for position, word_id in zip(positions, select_word_id):
