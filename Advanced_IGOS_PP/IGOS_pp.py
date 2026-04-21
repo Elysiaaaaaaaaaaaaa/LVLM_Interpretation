@@ -305,8 +305,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         vis_gamma = 0.4
         masks = np.power(masks, vis_gamma)
         
-        # 高显著性 -> 高标量 -> JET 暖色；applyColorMap 为 BGR，与原图 BGR 对齐后再叠图
-        heatmap = np.uint8(255 * masks)
+        # iGOS mask 在归一化后往往「显著区域数值小、背景大」；(1-masks) 使显著→高标量→JET 暖色；applyColorMap 为 BGR，与原图 BGR 对齐后再叠图
+        heatmap = np.uint8(255 * np.clip(1.0 - masks, 0.0, 1.0))
         heatmap_bgr = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
         original_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         superimposed_img = heatmap_bgr * 0.35 + original_bgr * 0.65
@@ -474,7 +474,7 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
         image = np.array(image)
         masks = cv2.resize(masks, (image.shape[1], image.shape[0]))
         
-        heatmap = np.uint8(255 * masks)
+        heatmap = np.uint8(255 * np.clip(1.0 - masks, 0.0, 1.0))
         heatmap_bgr = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
         original_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         superimposed_img = heatmap_bgr * 0.4 + original_bgr
