@@ -1,6 +1,6 @@
 [
     {
         "image_path": "photoes/test3.jpg",
-        "question": "Qwen3-Max"
+        "question": "is Qwen3-Max in this image?"
     }
 ]
