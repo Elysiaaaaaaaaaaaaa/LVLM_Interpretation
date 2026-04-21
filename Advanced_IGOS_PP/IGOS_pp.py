@@ -305,10 +305,11 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         vis_gamma = 0.4
         masks = np.power(masks, vis_gamma)
         
-        heatmap = np.uint8(255 * (1-masks))  
-        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-        original_image = image
-        superimposed_img = heatmap * 0.35 + original_image * 0.65
+        # 高显著性 -> 高标量 -> JET 暖色；applyColorMap 为 BGR，与原图 BGR 对齐后再叠图
+        heatmap = np.uint8(255 * masks)
+        heatmap_bgr = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        original_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        superimposed_img = heatmap_bgr * 0.35 + original_bgr * 0.65
         superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
         # cv2.imwrite("igos++.jpg", superimposed_img)
     
@@ -473,10 +474,10 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
         image = np.array(image)
         masks = cv2.resize(masks, (image.shape[1], image.shape[0]))
         
-        heatmap = np.uint8(255 * (1-masks))  
-        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-        original_image = image
-        superimposed_img = heatmap * 0.4 + original_image
+        heatmap = np.uint8(255 * masks)
+        heatmap_bgr = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        original_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        superimposed_img = heatmap_bgr * 0.4 + original_bgr
         superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
         # cv2.imwrite("igos++.jpg", superimposed_img)
         
