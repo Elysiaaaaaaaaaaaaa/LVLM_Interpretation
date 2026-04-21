@@ -140,7 +140,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     # iterations=10
     # lr=1.0  # 降低学习率以防止梯度爆炸
 
-    size=32
+    size=48
     opt = 'NAG'
     diverse_k = 1
     init_posi = 0
