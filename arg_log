@@ -1,0 +1,13 @@
+size=48
+opt = 'NAG'
+diverse_k = 1
+init_posi = 0
+init_val = 0.5
+L1 = 0.5
+L2 = 60
+gamma = 0.5
+L3 = 30
+momentum = 5
+ig_iter = 10
+iterations=25
+lr=0.005
