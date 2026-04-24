@@ -151,6 +151,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     L3 = 30
     momentum = 0.8
     ig_iter = 10
+    # 将 ig_iter 拆成多段依次 backward，显存峰值约按段数下降；须满足 ig_iter % ig_chunks == 0
+    ig_chunks = 1
     iterations=40
     lr=0.005
     
@@ -268,6 +270,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
                 size=size,
                 iterations=iterations,
                 ig_iter=ig_iter,
+                ig_chunks=ig_chunks,
                 L1=L1,
                 L2=L2,
                 L3=L3,
@@ -340,6 +343,7 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
     L3 = 10.0
     momentum = 5
     ig_iter = 10
+    ig_chunks = 1
     iterations=5
     lr=10
     
@@ -455,6 +459,7 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
                 size=size,
                 iterations=iterations,
                 ig_iter=ig_iter,
+                ig_chunks=ig_chunks,
                 L1=L1,
                 L2=L2,
                 L3=L3,
@@ -484,10 +489,17 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
         
     return masks, superimposed_img
 
-def interval_score(model, inputs, generated_ids, images, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True, positions=None, processor=None):
+def interval_score(model, inputs, generated_ids, images, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True, positions=None, processor=None, intervals=None):
     # if model_name == 'llava' or model_name == 'llava_next' or model_name == 'mgm':
-    # The intervals to approximate the integral over
-    intervals = torch.linspace(1/num_iter, 1, num_iter, requires_grad=False).to(model.device).view(-1, 1, 1, 1)
+    # The intervals to approximate the integral over (α = k/num_iter, k=1..num_iter).
+    # If intervals is provided (e.g. IG chunked), it must be shape [chunk_len, 1, 1, 1];
+    # loss is still normalized by full num_iter so chunk losses sum to the same IG estimate.
+    if intervals is None:
+        intervals = torch.linspace(1/num_iter, 1, num_iter, requires_grad=False).to(model.device).view(-1, 1, 1, 1)
+    else:
+        intervals = intervals.detach().to(device=model.device, dtype=up_masks.dtype)
+        if intervals.dim() == 1:
+            intervals = intervals.reshape(-1, 1, 1, 1)
     interval_masks = up_masks.unsqueeze(1) * intervals
     local_images = phi(images.unsqueeze(1), baseline.unsqueeze(1), interval_masks)
 
@@ -552,49 +564,78 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
     return final_loss
 
 
-def integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True,  positions=None,processor=None):
-    loss = interval_score(
-        model, 
-        inputs, 
-        generated_ids, 
-        image, 
-        target_token_position, 
-        selected_token_word_id,
-        baseline, 
-        up_masks, 
-        num_iter, 
-        noise=noise, 
-        positions=positions,
-        processor=processor)
-    
-    # [DEBUG] Check loss for NaN before backward
-    if torch.isnan(loss):
-        print(f"[NaN DEBUG] integrated_gradient: loss is NaN before backward!")
-        print(f"  up_masks range: [{up_masks.min().item():.4f}, {up_masks.max().item():.4f}]")
-        print(f"  num_iter: {num_iter}, positions: {positions}")
-        return float('nan')
-    
-    # print(f"[integrated_gradient] loss before backward: {loss.item():.4e}")
-    
-    loss.sum().backward()
-    
-    # [DEBUG] Check gradient for NaN after backward
-    if up_masks.grad is not None:
-        if torch.isnan(up_masks.grad).any():
+def integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True, positions=None, processor=None, ig_chunks=1):
+    """Integrated-gradient loss; optional ig_chunks splits Riemann steps to save VRAM (gradients accumulate)."""
+    if ig_chunks is None or ig_chunks <= 1:
+        loss = interval_score(
+            model,
+            inputs,
+            generated_ids,
+            image,
+            target_token_position,
+            selected_token_word_id,
+            baseline,
+            up_masks,
+            num_iter,
+            noise=noise,
+            positions=positions,
+            processor=processor)
+        if torch.isnan(loss):
+            print(f"[NaN DEBUG] integrated_gradient: loss is NaN before backward!")
+            print(f"  up_masks range: [{up_masks.min().item():.4f}, {up_masks.max().item():.4f}]")
+            print(f"  num_iter: {num_iter}, positions: {positions}")
+            return float('nan')
+        loss.sum().backward()
+        if up_masks.grad is not None and torch.isnan(up_masks.grad).any():
             print(f"[NaN DEBUG] integrated_gradient: up_masks.grad contains NaN after backward!")
             print(f"  grad NaN count: {torch.isnan(up_masks.grad).sum().item()}")
-        # if up_masks.grad is not None:
-        #     grad_norm = up_masks.grad.norm().item()
-        #     grad_max = up_masks.grad.abs().max().item()
-        #     print(f"[integrated_gradient] up_masks grad norm: {grad_norm:.4e}, max: {grad_max:.4e}")
-    
-    loss_value = loss.sum().item()
-    
-    # [DEBUG] Final check
-    if math.isnan(loss_value):
-        print(f"[NaN DEBUG] integrated_gradient: final loss_value is NaN!")
-    
-    return loss_value
+        loss_value = loss.sum().item()
+        if math.isnan(loss_value):
+            print(f"[NaN DEBUG] integrated_gradient: final loss_value is NaN!")
+        return loss_value
+
+    if num_iter % ig_chunks != 0:
+        raise ValueError(f"ig_iter ({num_iter}) must be divisible by ig_chunks ({ig_chunks})")
+    chunk_size = num_iter // ig_chunks
+    total_loss = 0.0
+    dtype = up_masks.dtype if up_masks.dtype.is_floating_point else torch.float32
+    for b in range(ig_chunks):
+        start_k = b * chunk_size
+        intervals = torch.linspace(
+            (start_k + 1) / num_iter,
+            (start_k + chunk_size) / num_iter,
+            chunk_size,
+            requires_grad=False,
+            device=model.device,
+            dtype=dtype,
+        ).view(-1, 1, 1, 1)
+        loss = interval_score(
+            model,
+            inputs,
+            generated_ids,
+            image,
+            target_token_position,
+            selected_token_word_id,
+            baseline,
+            up_masks,
+            num_iter,
+            noise=noise,
+            positions=positions,
+            processor=processor,
+            intervals=intervals)
+        if torch.isnan(loss):
+            print(f"[NaN DEBUG] integrated_gradient (chunk {b}/{ig_chunks}): loss is NaN before backward!")
+            print(f"  up_masks range: [{up_masks.min().item():.4f}, {up_masks.max().item():.4f}]")
+            print(f"  num_iter: {num_iter}, positions: {positions}")
+            return float('nan')
+        loss.sum().backward()
+        total_loss += loss.sum().item()
+    if up_masks.grad is not None and torch.isnan(up_masks.grad).any():
+        print(f"[NaN DEBUG] integrated_gradient: up_masks.grad contains NaN after chunked backward!")
+        print(f"  grad NaN count: {torch.isnan(up_masks.grad).sum().item()}")
+    if math.isnan(total_loss):
+        print(f"[NaN DEBUG] integrated_gradient: final total_loss is NaN!")
+    return total_loss
 
 def iGOS_pp(
         model,
@@ -609,6 +650,7 @@ def iGOS_pp(
         size=32,
         iterations=15,
         ig_iter=20,
+        ig_chunks=1,
         L1=1,
         L2=1,
         L3=20,
@@ -702,7 +744,7 @@ def iGOS_pp(
             print(f"[NaN DEBUG] iGOS_pp iter {i}: combined_mask (up_masks1 * up_masks2) contains NaN!")
 
         # Compute the integrated gradient for the combined mask, optimized for deletion
-        loss_comb_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor)
+        loss_comb_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
         # [DEBUG] Check loss_comb_del for NaN
         if math.isnan(loss_comb_del):
@@ -723,7 +765,7 @@ def iGOS_pp(
             total_grads2 = torch.zeros_like(masks_ins)
 
         # Compute the integrated gradient for the combined mask, optimized for insertion
-        loss_comb_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor)
+        loss_comb_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
         # 确保梯度存在
         if masks_del.grad is not None and masks_ins.grad is not None:
@@ -733,7 +775,7 @@ def iGOS_pp(
             masks_ins.grad.zero_()
 
         # Compute the integrated gradient for the deletion mask
-        loss_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1, ig_iter, positions=positions, processor=processor)
+        loss_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
         # 确保梯度存在
         if masks_del.grad is not None:
@@ -741,7 +783,7 @@ def iGOS_pp(
             masks_del.grad.zero_()
 
         # Compute the integrated graident for the insertion mask
-        loss_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks2, ig_iter, positions=positions, processor=processor)
+        loss_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
         # 确保梯度存在
         if masks_ins.grad is not None:
