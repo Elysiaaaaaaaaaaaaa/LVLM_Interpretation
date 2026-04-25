@@ -198,94 +198,250 @@ def find_keywords(model, inputs, generated_ids, output_ids, image, blur_image,
 2. 选择log概率差异大于1.0的token
 3. 过滤掉特殊token（标点符号等）
 
-### 4. 积分梯度计算
+### 4. `integrated_gradient()`：给当前 mask 算“该往哪改”的梯度
 
-**代码位置**: `integrated_gradient()` 和 `interval_score()` 函数
+**代码位置**: `Advanced_IGOS_PP/IGOS_pp.py` 中的 `integrated_gradient()` 和 `interval_score()`。
 
-```python
-def interval_score(model, inputs, generated_ids, images, target_token_position, 
-                   selected_token_word_id, baseline, up_masks, num_iter, 
-                   noise=True, positions=None, processor=None):
-    # 创建积分区间
-    intervals = torch.linspace(1/num_iter, 1, num_iter).view(-1, 1, 1, 1)
-    interval_masks = up_masks.unsqueeze(1) * intervals
-    
-    # 在mask路径上采样
-    local_images = phi(images.unsqueeze(1), baseline.unsqueeze(1), interval_masks)
-    
-    if noise:
-        local_images = local_images + torch.randn_like(local_images) * 0.2
-    
-    # 计算每个采样点的损失
-    losses = torch.tensor(0.).to(model.device)
-    for single_img in local_images:
-        probs = pred_probs(model, inputs, generated_ids, single_img, 
-                          target_token_position, selected_token_word_id, need_grad=True)
-        losses += torch.log(probs)[positions].sum()
-    
-    return losses / num_iter
-```
+这个函数名字叫积分梯度，但在当前代码里可以把它理解成一句话：**给定一张原图、一张 baseline 图和一个 mask，沿着“baseline → 被 mask 保留后的图像”这条路径取很多个点，看看目标 token 的 log 概率怎么变，然后反向传播，把梯度写回 mask。**
 
-**积分梯度原理**：
-- 从baseline到原图的路径上积分梯度
-- 使用黎曼和近似积分
-- 添加噪声提高鲁棒性
+#### 输入参数怎么理解
 
-### 5. iGOS++迭代优化
+- `image`：路径的一端，通常是原图 tensor。
+- `baseline`：路径的另一端，通常是模糊图、全 0 图或其他参考图。
+- `up_masks`：已经上采样到图像尺寸的 mask，值在 `[0, 1]`。越接近 1，越保留 `image`；越接近 0，越接近 `baseline`。
+- `num_iter` / `ig_iter`：积分路径上采样多少个点。例如 `50` 就是取 `1/50, 2/50, ..., 1` 这 50 个 alpha。
+- `ig_chunks`：把 `ig_iter` 分块 backward，主要是为了省显存。比如 `ig_iter=50, ig_chunks=5`，每次只算 10 个采样点，但总梯度仍然累加到同一个 mask 上。
+- `positions`：要解释的目标 token 位置，只对这些 token 的 log 概率求和。
+- `processor`：可选的图像打包函数。QwenVL 分支里会传 `tensor2pack`，把 `[B,C,H,W]` 转成模型需要的视觉 patch 格式。
 
-**代码位置**: `iGOS_pp()` 函数
+#### 关键代码流程
 
 ```python
-def iGOS_pp(model, inputs, generated_ids, init_mask, image, 
-            target_token_position, selected_token_word_id, baseline, label,
-            size=32, iterations=10, ig_iter=10, L1=1.0, L2=0.1, L3=10.0, lr=1e-4):
-    
-    # 初始化删除和插入mask
-    masks_del = torch.ones((1, 1, size, size)) * init_mask
-    masks_ins = torch.ones((image.shape[0], 1, size, size)) * init_mask
-    
-    for i in range(iterations):
-        # 上采样mask
-        up_masks1 = upscale(masks_del, image)
-        up_masks2 = upscale(masks_ins, image)
-        
-        # 计算组合mask的积分梯度（删除方向）
-        loss_comb_del = integrated_gradient(model, inputs, generated_ids, image, 
-                                           target_token_position, selected_token_word_id, 
-                                           baseline, up_masks1 * up_masks2, ig_iter)
-        
-        # 计算组合mask的积分梯度（插入方向）
-        loss_comb_ins = integrated_gradient(...)
-        
-        # 计算删除mask的积分梯度
-        loss_del = integrated_gradient(...)
-        
-        # 计算插入mask的积分梯度
-        loss_ins = integrated_gradient(...)
-        
-        # 计算正则化损失
-        loss_l1, loss_tv, loss_l2 = regularization_loss(image, masks_del * masks_ins)
-        
-        # 累加梯度
-        total_grads1 = (grad_del + grad_comb_del - grad_comb_ins) / 2
-        total_grads2 = (grad_ins - grad_comb_ins + grad_comb_del) / 2
-        
-        # 更新mask（使用NAG优化器）
-        masks_del.data -= lr * total_grads1
-        masks_ins.data -= lr * total_grads2
-        
-        # 限制mask值在[0,1]范围
-        masks_del.data.clamp_(0, 1)
-        masks_ins.data.clamp_(0, 1)
-    
-    return masks_del * masks_ins
+intervals = torch.linspace(1/num_iter, 1, num_iter).view(-1, 1, 1, 1)
+interval_masks = up_masks.unsqueeze(1) * intervals
+local_images = phi(images.unsqueeze(1), baseline.unsqueeze(1), interval_masks)
 ```
 
-**优化策略**：
-1. **双mask优化**：同时优化删除和插入mask
-2. **组合损失**：考虑mask的乘积效果
-3. **梯度平均**：平衡不同损失项的梯度
-4. **NAG优化器**：使用Nesterov加速梯度下降
+这几行在做路径采样。`intervals` 是一组 alpha，`interval_masks = mask * alpha`。当 alpha 很小时，图像更接近 baseline；当 alpha 接近 1 时，图像更接近当前 mask 作用后的图。
+
+`phi()` 是真正混合图像的函数：
+
+```python
+def phi(img, baseline, mask):
+    return img.mul(mask) + baseline.mul(1-mask)
+```
+
+所以每个采样点的图像都是：
+
+```text
+local_image = image * interval_mask + baseline * (1 - interval_mask)
+```
+
+然后 `interval_score()` 会逐个采样点喂给模型：
+
+```python
+log_probs = pred_probs(
+    model,
+    inputs,
+    generated_ids,
+    single_input,
+    target_token_position,
+    selected_token_word_id,
+    need_grad=True,
+    return_log_probs=True,
+)
+losses += log_probs[positions].sum()
+```
+
+这里不是直接看整句输出，而是只看 `positions` 指定的目标 token。比如你想解释 caption 里的 `"dog"`，那这里累加的就是 `"dog"` 对应位置的 log 概率。
+
+最后：
+
+```python
+loss.sum().backward()
+return loss.sum().item()
+```
+
+这一步很重要：`integrated_gradient()` 返回的是一个 Python 数值，方便打印 loss；但它真正有用的副作用是 `backward()`。调用结束后，梯度会写到依赖 `up_masks` 的原始 mask 上，也就是后面的 `masks_del.grad` 或 `masks_ins.grad`。
+
+#### 为什么它叫“积分”
+
+普通梯度只问：“当前 mask 这个点，往哪里动能让目标 token 概率变化最大？”  
+积分梯度多问一步：“从 baseline 慢慢走到当前图像的整条路上，平均来看，哪些区域一直在影响目标 token？”
+
+所以它比单点梯度更稳定一些。代码里用的是离散近似，也就是用 `ig_iter` 个采样点的平均值近似连续积分：
+
+```python
+final_loss = losses / num_iter
+```
+
+#### debug 时重点看什么
+
+- 如果 `up_masks` 出 NaN，问题通常来自上一轮 mask 更新、学习率过大或正则项梯度异常。
+- 如果 `local_images` 出 NaN，优先检查 `image`、`baseline`、`up_masks` 是否已经有 NaN，以及 `phi()` 混合前后的 dtype/range。
+- 如果 `log_probs` 出 NaN，优先检查模型前向、`processor(single_img)` 输出、`positions` 是否越界，以及 fp16 下概率是否数值不稳定。
+- 如果 `ig_chunks > 1`，必须满足 `ig_iter % ig_chunks == 0`，否则代码会直接抛 `ValueError`。
+- 如果发现返回的 `loss_value` 正常但 mask 没变化，重点检查 `masks_del.grad` / `masks_ins.grad` 是否为 `None` 或全 0，因为真正驱动更新的是 `.grad`，不是返回值。
+
+### 5. `iGOS_pp()`：反复优化两个 mask，找出“删掉会掉分、插入会涨分”的区域
+
+**代码位置**: `Advanced_IGOS_PP/IGOS_pp.py` 中的 `iGOS_pp()`。
+
+`iGOS_pp()` 是整个可视化算法的主循环。它不是直接算一张热力图，而是先维护两个低分辨率 mask：
+
+- `masks_del`：删除 mask。希望找到“保留它时目标 token 分数高、拿掉它时分数明显下降”的区域。
+- `masks_ins`：插入 mask。希望找到“从 baseline 开始只插入它时，目标 token 分数明显上升”的区域。
+
+最后返回的是：
+
+```python
+return masks_del * masks_ins, losses_del, losses_ins, ...
+```
+
+也就是说最终可视化用的是两个 mask 的乘积。只有同时被删除目标和插入目标认可的区域，才会在最终 mask 里留下来。
+
+#### 初始化阶段
+
+```python
+masks_del = torch.ones((1, 1, size, size), dtype=torch.float32, device=device)
+masks_del = masks_del * init_mask.to(device)
+masks_del = Variable(masks_del, requires_grad=True)
+
+masks_ins = torch.ones((image.shape[0], 1, size, size), dtype=torch.float32, device=device)
+masks_ins = masks_ins * init_mask.to(device)
+masks_ins = Variable(masks_ins, requires_grad=True)
+```
+
+这里的 mask 是低分辨率的，比如当前 QwenVL 配置里 `size=48`，不是原图尺寸。每轮迭代时会用 `upscale()` 放大到图像尺寸，这样优化更省显存，也让结果更平滑。
+
+`init_mask` 来自 `get_initial()`。当前配置里 `init_val=0.5`，可以理解成一开始每个区域“半保留、半遮挡”，然后再靠梯度把重要区域和背景拉开。
+
+#### 每轮迭代做什么
+
+每一轮大致是：
+
+1. 把两个低分辨率 mask 上采样到图像尺寸。
+2. 对组合 mask、删除 mask、插入 mask 分别调用 `integrated_gradient()`。
+3. 从 `.grad` 里取出梯度并按删除/插入方向组合。
+4. 加上 L1、TV、L2 正则化梯度。
+5. 用 `LS` 或 `NAG` 更新 mask。
+6. 把 mask clamp 回 `[0, 1]`。
+
+代码对应关系如下：
+
+```python
+up_masks1 = upscale(masks_del, image)
+up_masks2 = upscale(masks_ins, image)
+combined_mask = up_masks1 * up_masks2
+```
+
+`up_masks1` 是删除 mask 的图像尺寸版本，`up_masks2` 是插入 mask 的图像尺寸版本，`combined_mask` 是二者交集。
+
+#### 四次 `integrated_gradient()` 分别在干什么
+
+一轮里最核心的是这四次调用：
+
+```python
+loss_comb_del = integrated_gradient(..., image, ..., baseline, up_masks1 * up_masks2, ...)
+loss_comb_ins = integrated_gradient(..., image, ..., baseline, up_masks1 * up_masks2, ...)
+loss_del = integrated_gradient(..., image, ..., baseline, up_masks1, ...)
+loss_ins = integrated_gradient(..., image, ..., baseline, up_masks2, ...)
+```
+
+从意图上看，它们分别对应：
+
+- `loss_comb_del`：看两个 mask 共同保留的区域，在删除目标下有多重要。
+- `loss_comb_ins`：看两个 mask 共同保留的区域，在插入目标下有多重要。
+- `loss_del`：单独更新删除 mask，让它更擅长找到“删掉会影响目标 token”的区域。
+- `loss_ins`：单独更新插入 mask，让它更擅长找到“插入就能恢复目标 token”的区域。
+
+当前代码里插入方向通过“减梯度”实现：
+
+```python
+total_grads1 -= masks_del.grad.clone()
+total_grads2 -= masks_ins.grad.clone()
+...
+total_grads2 -= masks_ins.grad.clone()
+```
+
+原因是删除和插入的优化方向相反：删除希望找到让原图分数下降的区域，插入希望找到能从 baseline 中把分数拉起来的区域。所以同样是目标 token 的 log 概率，插入项在组合梯度时要反向处理。
+
+注意一个很适合 debug 的细节：经典 insertion 通常会把 `image` 和 `baseline` 的角色互换，也就是从 baseline 逐渐插入原图；但当前 `Advanced_IGOS_PP/IGOS_pp.py` 主循环里的 `loss_comb_ins` 和 `loss_ins` 调用，实参顺序仍然是 `image, ..., baseline`，主要靠后面的“减梯度”体现反向优化。如果你后面发现 insertion loss 行为和预期不一致，可以优先对比根目录 `methods.py` 里的旧版写法，那里插入项是 `integrated_gradient(..., baseline, image, ...)`。
+
+#### 正则化在约束什么
+
+```python
+loss_l1, loss_tv, loss_l2 = regularization_loss(image, masks_del * masks_ins)
+losses = loss_l1 + loss_tv + loss_l2
+losses.sum().backward()
+total_grads1 += masks_del.grad.clone()
+total_grads2 += masks_ins.grad.clone()
+```
+
+正则化不是模型分数，它是在约束 mask 的形状：
+
+- `L1 * mean(abs(1 - masks))`：控制 mask 不要随便大面积偏离 1。
+- `L3 * bilateral_tv_norm(...)`：让 mask 空间上更连续，同时尽量尊重图像边缘，避免热力图变成散点噪声。
+- `L2 * sum((1 - masks)^2)`：进一步惩罚过强遮挡，防止 mask 全部塌到 0。
+
+debug 时如果热力图特别碎，通常先看 `L3` / TV；如果 mask 几乎全白或全黑，通常看 `L1`、`L2`、`lr` 和目标 token 的 loss 是否有有效梯度。
+
+#### mask 是怎么更新的
+
+当前常用配置是 `opt='NAG'`：
+
+```python
+e = i / (i + momentum)
+cita_d = masks_del.data - lr * total_grads1
+cita_i = masks_ins.data - lr * total_grads2
+masks_del.data = cita_d + e * (cita_d - cita_d_p)
+masks_ins.data = cita_i + e * (cita_i - cita_i_p)
+```
+
+可以把它理解成“带惯性的梯度下降”：本轮先按梯度走一步，再叠加一点上一轮到这一轮的运动方向。好处是收敛可能更快；坏处是如果 `lr` 太大或梯度有 NaN，问题会被动量放大。
+
+最后一定会执行：
+
+```python
+masks_del.data.clamp_(0, 1)
+masks_ins.data.clamp_(0, 1)
+```
+
+这是为了保证 mask 仍然是可解释的比例值。debug 时如果你看到更新前数值已经飞到很大，但更新后又都被 clamp 到 0 或 1，说明学习率或梯度尺度很可能过强。
+
+#### 一轮输出的 loss 怎么看
+
+每轮会打印：
+
+```text
+iteration: i lr: ... loss_comb_del: ..., loss_comb_ins: ...,
+loss_del: ..., loss_ins: ..., loss_l1: ..., loss_tv: ..., loss_l2: ...
+```
+
+建议 debug 时这样读：
+
+- `loss_del` / `loss_ins` 长时间不变：目标 token 可能没选好、mask 梯度断了，或 `processor` 后图像没有真正变化。
+- `loss_l1`、`loss_l2` 很大：mask 正在大面积远离 1，可能遮挡过强。
+- `loss_tv` 很大：mask 很碎，空间不平滑。
+- 某个 loss 变成 NaN：按日志里的 `[NaN DEBUG]` 往前追，通常先定位是 `up_masks`、`local_images`、`log_probs` 还是正则项。
+- mask 每轮都接近全 0 或全 1：优先检查 `lr`、`total_grads` 范围、`clip_grad_norm_` 是否真的限制住了数值，以及 `L1/L2/L3` 是否把优化目标压住了。
+
+#### 和最终热力图的关系
+
+`iGOS_pp()` 返回的 mask 不是“值越大越红”那么简单。后处理里会先归一化，然后做：
+
+```python
+heatmap = np.uint8(255 * np.clip(1.0 - masks, 0.0, 1.0))
+```
+
+也就是说当前可视化会把 `1 - masks` 送进 JET colormap。README 后面说的“红色重要区域”，对应的是最终处理后的暖色区域；如果你直接看原始 `masks` 数值，要注意它和显示颜色之间有一次反转。
+
+**优化策略总结**：
+1. **双 mask 优化**：用 `masks_del` 和 `masks_ins` 同时约束显著区域，减少单一删除或插入目标带来的偏差。
+2. **组合 mask 约束**：用 `masks_del * masks_ins` 让两个 mask 的交集也满足删除/插入目标。
+3. **积分梯度取梯度**：每次不是只看一个扰动点，而是沿 baseline 到当前图像的路径平均估计影响。
+4. **正则化控形状**：L1/L2 控制遮挡面积和强度，TV 控制空间连续性。
+5. **NAG/LS 更新**：`NAG` 用动量加速，`LS` 用线搜索自适应步长；当前 QwenVL 配置主要走 `NAG`。
 
 ### 6. 正则化
 

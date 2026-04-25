@@ -599,6 +599,8 @@ def integrated_gradient(model, inputs, generated_ids, image, target_token_positi
     chunk_size = num_iter // ig_chunks
     total_loss = 0.0
     dtype = up_masks.dtype if up_masks.dtype.is_floating_point else torch.float32
+    # 与上游 upscale 解耦：各 chunk 的 backward 只作用在 detached 叶子上，避免多次 backward 释放 upscale 图后二次穿越
+    up_masks_detached = up_masks.detach().requires_grad_(True)
     for b in range(ig_chunks):
         start_k = b * chunk_size
         intervals = torch.linspace(
@@ -617,7 +619,7 @@ def integrated_gradient(model, inputs, generated_ids, image, target_token_positi
             target_token_position,
             selected_token_word_id,
             baseline,
-            up_masks,
+            up_masks_detached,
             num_iter,
             noise=noise,
             positions=positions,
@@ -630,9 +632,11 @@ def integrated_gradient(model, inputs, generated_ids, image, target_token_positi
             return float('nan')
         loss.sum().backward()
         total_loss += loss.sum().item()
-    if up_masks.grad is not None and torch.isnan(up_masks.grad).any():
-        print(f"[NaN DEBUG] integrated_gradient: up_masks.grad contains NaN after chunked backward!")
-        print(f"  grad NaN count: {torch.isnan(up_masks.grad).sum().item()}")
+    if up_masks_detached.grad is not None and torch.isnan(up_masks_detached.grad).any():
+        print(f"[NaN DEBUG] integrated_gradient: up_masks_detached.grad contains NaN after chunked backward!")
+        print(f"  grad NaN count: {torch.isnan(up_masks_detached.grad).sum().item()}")
+    if up_masks_detached.grad is not None:
+        up_masks.backward(up_masks_detached.grad)
     if math.isnan(total_loss):
         print(f"[NaN DEBUG] integrated_gradient: final total_loss is NaN!")
     return total_loss
