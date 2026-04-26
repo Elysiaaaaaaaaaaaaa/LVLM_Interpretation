@@ -150,11 +150,11 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     gamma = 0.5
     L3 = 30
     momentum = 0.8
-    ig_iter = 50
+    ig_iter = 30
     # 将 ig_iter 拆成多段依次 backward，显存峰值约按段数下降；须满足 ig_iter % ig_chunks == 0
-    ig_chunks = 5
+    ig_chunks = 3
     iterations=25
-    lr=0.005
+    lr=1.0
     
     method = iGOS_pp
     
