@@ -413,6 +413,71 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
     
     return returned_logits[0]
 
+def save_keyword_score_distribution(output_ids, probs, probs_blur, key_word_threshold, tokenizer=None,
+                                    save_dir="photoes", filename="keyword_score_distribution.png",
+                                    selected_positions=None):
+    """
+    Save a bar chart for keyword decision scores of generated tokens.
+
+    The score matches find_keywords: log(P(token | image)) - log(P(token | blurred image)).
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    probs_cpu = probs.detach().float().cpu()
+    probs_blur_cpu = probs_blur.detach().float().cpu()
+    eps = torch.finfo(probs_cpu.dtype).tiny
+    scores = (
+        torch.log(torch.clamp(probs_cpu, min=eps))
+        - torch.log(torch.clamp(probs_blur_cpu, min=eps))
+    ).numpy()
+
+    if isinstance(output_ids, (list, tuple)):
+        token_ids = output_ids[0]
+    elif output_ids.dim() > 1:
+        token_ids = output_ids[0]
+    else:
+        token_ids = output_ids
+    token_ids = token_ids.detach().cpu().tolist()
+
+    if tokenizer is None:
+        token_labels = [str(token_id) for token_id in token_ids]
+    else:
+        token_labels = [
+            tokenizer.decode([int(token_id)], skip_special_tokens=False).replace("\n", "\\n")
+            for token_id in token_ids
+        ]
+
+    selected_positions = set(selected_positions or [])
+    colors = [
+        "tab:orange" if i in selected_positions or score > key_word_threshold else "tab:blue"
+        for i, score in enumerate(scores)
+    ]
+
+    x = np.arange(len(scores))
+    fig_width = max(10, min(0.45 * len(scores), 28))
+    fig, ax = plt.subplots(figsize=(fig_width, 6))
+    ax.bar(x, scores, color=colors)
+    ax.axhline(
+        key_word_threshold,
+        color="red",
+        linestyle="--",
+        linewidth=1.5,
+        label=f"key_word_threshold={key_word_threshold:g}",
+    )
+    ax.set_xlabel("Generated token")
+    ax.set_ylabel("Keyword score: log(p) - log(p_blur)")
+    ax.set_title("Keyword Decision Score Distribution")
+    ax.set_xticks(x)
+    ax.set_xticklabels(token_labels, rotation=60, ha="right")
+    ax.legend()
+    ax.grid(axis="y", linestyle=":", alpha=0.4)
+    fig.tight_layout()
+
+    save_path = os.path.join(save_dir, filename)
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return save_path
+
 def find_keywords(model, inputs, generated_ids, output_ids, image, blur_image, target_token_position, selected_token_word_id, tokenizer=None):
     # select keywords according to logits drop
     # full_prompt = torch.cat((input_ids, output_ids), dim=1)
@@ -434,8 +499,10 @@ def find_keywords(model, inputs, generated_ids, output_ids, image, blur_image, t
         print(f"  zero count: {(probs_blur <= 0).sum().item()}, min: {probs_blur.min().item():.2e}")
 
     # condition = (probs_blur <= 0.4*probs) & (~torch.isin(output_ids[0], torch.tensor(special_ids).to(probs.device)))
-    condition = (torch.log(probs)-torch.log(probs_blur) > 1.0)& (probs>=0.0) & (~torch.isin(output_ids[0], torch.tensor(special_ids).to(probs.device)))
+    key_word_threshold = 2.0
+    condition = (torch.log(probs)-torch.log(probs_blur) > key_word_threshold)& (probs>=0.0) & (~torch.isin(output_ids[0], torch.tensor(special_ids).to(probs.device)))
     positions = torch.where(condition)[0].tolist()
+    save_keyword_score_distribution(output_ids, probs, probs_blur, key_word_threshold, tokenizer)
     
     if len(positions) == 0:
         idx = torch.argmax(probs-probs_blur).item()
