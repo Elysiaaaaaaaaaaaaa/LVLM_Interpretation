@@ -140,11 +140,11 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     # iterations=10
     # lr=1.0  # 降低学习率以防止梯度爆炸
 
-    size=48
+    size=32
     opt = 'NAG'
     diverse_k = 1
     init_posi = 0
-    init_val = 0.5
+    init_val = 0.
     L1 = 0.5
     L2 = 60
     gamma = 0.5
@@ -153,8 +153,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     ig_iter = 20
     # 将 ig_iter 拆成多段依次 backward，显存峰值约按段数下降；须满足 ig_iter % ig_chunks == 0
     ig_chunks = 2
-    iterations=25
-    lr=0.1
+    iterations=10
+    lr=10
     
     method = iGOS_pp
     
@@ -258,48 +258,48 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         label = label.unsqueeze(0)
         keyword = pred_data['keywords']
         now = time.time()
-        # masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
-        #         model=model,
-        #         inputs = inputs, 
-        #         generated_ids=generated_ids,
-        #         init_mask=pred_data['init_masks'][0],
-        #         image=pil_to_clip_tensor_bcwh(image).to(model.device),
-        #         target_token_position=target_token_position, selected_token_word_id=selected_token_word_id,
-        #         baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
-        #         label=label,
-        #         size=size,
-        #         iterations=iterations,
-        #         ig_iter=ig_iter,
-        #         ig_chunks=ig_chunks,
-        #         L1=L1,
-        #         L2=L2,
-        #         L3=L3,
-        #         lr=lr,
-        #         opt=opt,
-        #         prompt=input_ids,
-        #         image_size=image_size,
-        #         positions=keyword,
-        #         resolution=None,
-        #         processor=tensor2pack
-        #     )
         masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
-            model=model,
-            inputs = inputs, 
-            generated_ids=generated_ids,
-            init_mask=pred_data['init_masks'][0],
-            image=pil_to_clip_tensor_bcwh(image).to(model.device),
-            target_token_position=target_token_position, selected_token_word_id=selected_token_word_id,
-            baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
-            label=label,
-            size=size,
-            opt=opt,
-            lr = lr,
-            prompt=input_ids,
-            image_size=image_size,
-            positions=keyword,
-            resolution=None,
-            processor=tensor2pack
-        )
+                model=model,
+                inputs = inputs, 
+                generated_ids=generated_ids,
+                init_mask=pred_data['init_masks'][0],
+                image=pil_to_clip_tensor_bcwh(image).to(model.device),
+                target_token_position=target_token_position, selected_token_word_id=selected_token_word_id,
+                baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
+                label=label,
+                size=size,
+                iterations=iterations,
+                ig_iter=ig_iter,
+                ig_chunks=ig_chunks,
+                L1=L1,
+                L2=L2,
+                L3=L3,
+                lr=lr,
+                opt=opt,
+                prompt=input_ids,
+                image_size=image_size,
+                positions=keyword,
+                resolution=None,
+                processor=tensor2pack
+            )
+        # masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
+        #     model=model,
+        #     inputs = inputs, 
+        #     generated_ids=generated_ids,
+        #     init_mask=pred_data['init_masks'][0],
+        #     image=pil_to_clip_tensor_bcwh(image).to(model.device),
+        #     target_token_position=target_token_position, selected_token_word_id=selected_token_word_id,
+        #     baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
+        #     label=label,
+        #     size=size,
+        #     opt=opt,
+        #     lr = lr,
+        #     prompt=input_ids,
+        #     image_size=image_size,
+        #     positions=keyword,
+        #     resolution=None,
+        #     processor=tensor2pack
+        # )
         
         total_time += time.time() - now
         
