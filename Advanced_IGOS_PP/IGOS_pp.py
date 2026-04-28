@@ -293,6 +293,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
             label=label,
             size=size,
             opt=opt,
+            lr = lr,
             prompt=input_ids,
             image_size=image_size,
             positions=keyword,
