@@ -283,21 +283,23 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         #         processor=tensor2pack
         #     )
         masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
-                model=model,
-                inputs=inputs,
-                generated_ids=generated_ids,
-                init_mask=pred_data['init_masks'][0],
-                image=pil_to_clip_tensor_bcwh(image).to(model.device),
-                target_token_position=target_token_position,
-                selected_token_word_id=selected_token_word_id,
-                baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
-                label=label,
-                size=size,
-                prompt=input_ids,
-                image_size=image_size,
-                positions=keyword,
-                resolution=None,
-            )
+            model=model,
+            inputs = inputs, 
+            generated_ids=generated_ids,
+            init_mask=pred_data['init_masks'][0],
+            image=pil_to_clip_tensor_bcwh(image).to(model.device),
+            target_token_position=target_token_position, selected_token_word_id=selected_token_word_id,
+            baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
+            label=label,
+            size=size,
+            opt=opt,
+            prompt=input_ids,
+            image_size=image_size,
+            positions=keyword,
+            resolution=None,
+            processor=tensor2pack
+        )
+        
         total_time += time.time() - now
         
         # 清理内存
