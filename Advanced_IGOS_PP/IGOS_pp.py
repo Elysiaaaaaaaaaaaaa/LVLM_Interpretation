@@ -258,29 +258,45 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         label = label.unsqueeze(0)
         keyword = pred_data['keywords']
         now = time.time()
+        # masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
+        #         model=model,
+        #         inputs = inputs, 
+        #         generated_ids=generated_ids,
+        #         init_mask=pred_data['init_masks'][0],
+        #         image=pil_to_clip_tensor_bcwh(image).to(model.device),
+        #         target_token_position=target_token_position, selected_token_word_id=selected_token_word_id,
+        #         baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
+        #         label=label,
+        #         size=size,
+        #         iterations=iterations,
+        #         ig_iter=ig_iter,
+        #         ig_chunks=ig_chunks,
+        #         L1=L1,
+        #         L2=L2,
+        #         L3=L3,
+        #         lr=lr,
+        #         opt=opt,
+        #         prompt=input_ids,
+        #         image_size=image_size,
+        #         positions=keyword,
+        #         resolution=None,
+        #         processor=tensor2pack
+        #     )
         masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
                 model=model,
-                inputs = inputs, 
+                inputs=inputs,
                 generated_ids=generated_ids,
                 init_mask=pred_data['init_masks'][0],
                 image=pil_to_clip_tensor_bcwh(image).to(model.device),
-                target_token_position=target_token_position, selected_token_word_id=selected_token_word_id,
+                target_token_position=target_token_position,
+                selected_token_word_id=selected_token_word_id,
                 baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
                 label=label,
                 size=size,
-                iterations=iterations,
-                ig_iter=ig_iter,
-                ig_chunks=ig_chunks,
-                L1=L1,
-                L2=L2,
-                L3=L3,
-                lr=lr,
-                opt=opt,
                 prompt=input_ids,
                 image_size=image_size,
                 positions=keyword,
                 resolution=None,
-                processor=tensor2pack
             )
         total_time += time.time() - now
         
@@ -654,7 +670,7 @@ def iGOS_pp(
         size=32,
         iterations=15,
         ig_iter=20,
-        ig_chunks=1,
+        ig_chunks=2,
         L1=1,
         L2=1,
         L3=20,
@@ -664,9 +680,9 @@ def iGOS_pp(
         processor=None,
         **kwargs):
 
-    # L2 = 0.1
-    # gamma = 1.0
-    # momentum = 5
+    L2 = 0.1
+    gamma = 1.0
+    momentum = 5
     
     def regularization_loss(image, masks):
         return L1 * torch.mean(torch.abs(1 - masks).view(masks.shape[0], -1), dim=1), \
