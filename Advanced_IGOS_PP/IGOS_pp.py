@@ -664,9 +664,9 @@ def iGOS_pp(
         processor=None,
         **kwargs):
 
-    L2 = 0.1
-    gamma = 1.0
-    momentum = 5
+    # L2 = 0.1
+    # gamma = 1.0
+    # momentum = 5
     
     def regularization_loss(image, masks):
         return L1 * torch.mean(torch.abs(1 - masks).view(masks.shape[0], -1), dim=1), \
