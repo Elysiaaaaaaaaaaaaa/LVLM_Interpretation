@@ -274,6 +274,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
                 L1=L1,
                 L2=L2,
                 L3=L3,
+                gamma=gamma,
+                momentum=momentum,
                 lr=lr,
                 opt=opt,
                 prompt=input_ids,
@@ -482,6 +484,8 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
                 L1=L1,
                 L2=L2,
                 L3=L3,
+                gamma=gamma,
+                momentum=momentum,
                 lr=lr,
                 opt=opt,
                 prompt=input_ids,
@@ -677,16 +681,14 @@ def iGOS_pp(
         L1=1,
         L2=1,
         L3=20,
+        gamma=1.0,
+        momentum=5,
         lr=1000,
         opt='LS',
         softmax=True,
         processor=None,
         **kwargs):
 
-    L2 = 0.1
-    gamma = 1.0
-    momentum = 5
-    
     def regularization_loss(image, masks):
         return L1 * torch.mean(torch.abs(1 - masks).view(masks.shape[0], -1), dim=1), \
                L3 * bilateral_tv_norm(image, masks, tv_beta=2, sigma=0.01), \
