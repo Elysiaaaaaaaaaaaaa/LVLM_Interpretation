@@ -104,6 +104,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         text_prompt (_type_): _description_
         device (_type_): _description_
     """
+    image = image.convert("RGB").resize((334, 334), Image.BICUBIC)
     input_size = (image.size[1], image.size[0])
     size=32
     opt = 'NAG'
@@ -118,6 +119,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     ig_iter = 10
     iterations=5
     lr=10
+    ig_chunks=2
     
     method = iGOS_pp
     
@@ -417,10 +419,21 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
         
     return masks, superimposed_img
 
-def interval_score(model, inputs, generated_ids, images, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True, positions=None, processor=None):
+def interval_score(model, inputs, generated_ids, images, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True, positions=None, processor=None, intervals=None):
     # if model_name == 'llava' or model_name == 'llava_next' or model_name == 'mgm':
-    # The intervals to approximate the integral over
-    intervals = torch.linspace(1/num_iter, 1, num_iter, requires_grad=False).cuda().view(-1, 1, 1, 1)
+    # The intervals to approximate the integral over (α = k/num_iter, k=1..num_iter).
+    # If intervals is provided (e.g. IG chunked), shape [chunk_len, 1, 1, 1];
+    # loss is still normalized by full num_iter so chunk losses sum to the same IG estimate.
+    if intervals is None:
+        dtype = up_masks.dtype if up_masks.dtype.is_floating_point else torch.float32
+        intervals = torch.linspace(
+            1 / num_iter, 1, num_iter, requires_grad=False,
+            device=model.device, dtype=dtype,
+        ).view(-1, 1, 1, 1)
+    else:
+        intervals = intervals.detach().to(device=model.device, dtype=up_masks.dtype)
+        if intervals.dim() == 1:
+            intervals = intervals.reshape(-1, 1, 1, 1)
     interval_masks = up_masks.unsqueeze(1).to(model.device) * intervals.to(model.device)
     local_images = phi(images.unsqueeze(1), baseline.unsqueeze(1), interval_masks)
 
@@ -447,23 +460,61 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
     return losses / num_iter
 
 
-def integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True,  positions=None,processor=None):
-    loss = interval_score(
-        model, 
-        inputs, 
-        generated_ids, 
-        image, 
-        target_token_position, 
-        selected_token_word_id,
-        baseline, 
-        up_masks, 
-        num_iter, 
-        noise=noise, 
-        positions=positions,
-        processor=processor)
-    
-    loss.sum().backward(retain_graph=True)
-    return loss.sum().item()
+def integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks, num_iter, noise=True, positions=None, processor=None, ig_chunks=1):
+    """Integrated-gradient loss; optional ig_chunks splits Riemann steps to save VRAM (gradients accumulate)."""
+    if ig_chunks is None or ig_chunks <= 1:
+        loss = interval_score(
+            model,
+            inputs,
+            generated_ids,
+            image,
+            target_token_position,
+            selected_token_word_id,
+            baseline,
+            up_masks,
+            num_iter,
+            noise=noise,
+            positions=positions,
+            processor=processor)
+        loss.sum().backward(retain_graph=True)
+        return loss.sum().item()
+
+    if num_iter % ig_chunks != 0:
+        raise ValueError(f"ig_iter ({num_iter}) must be divisible by ig_chunks ({ig_chunks})")
+    chunk_size = num_iter // ig_chunks
+    total_loss = 0.0
+    dtype = up_masks.dtype if up_masks.dtype.is_floating_point else torch.float32
+    # Detach from upscale so each chunk backward only hits a leaf; then chain once into real up_masks.
+    up_masks_detached = up_masks.detach().requires_grad_(True)
+    for b in range(ig_chunks):
+        start_k = b * chunk_size
+        intervals = torch.linspace(
+            (start_k + 1) / num_iter,
+            (start_k + chunk_size) / num_iter,
+            chunk_size,
+            requires_grad=False,
+            device=model.device,
+            dtype=dtype,
+        ).view(-1, 1, 1, 1)
+        loss = interval_score(
+            model,
+            inputs,
+            generated_ids,
+            image,
+            target_token_position,
+            selected_token_word_id,
+            baseline,
+            up_masks_detached,
+            num_iter,
+            noise=noise,
+            positions=positions,
+            processor=processor,
+            intervals=intervals)
+        loss.sum().backward()
+        total_loss += loss.sum().item()
+    if up_masks_detached.grad is not None:
+        up_masks.backward(up_masks_detached.grad, retain_graph=True)
+    return total_loss
 
 def iGOS_pp(
         model,
@@ -478,6 +529,7 @@ def iGOS_pp(
         size=32,
         iterations=15,
         ig_iter=20,
+        ig_chunks=1,
         L1=1,
         L2=1,
         L3=20,
@@ -559,7 +611,7 @@ def iGOS_pp(
         up_masks2 = upscale(masks_ins, image)
 
         # Compute the integrated gradient for the combined mask, optimized for deletion
-        loss_comb_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor)
+        loss_comb_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
         total_grads1 = masks_del.grad.clone()
         total_grads2 = masks_ins.grad.clone()
@@ -567,7 +619,7 @@ def iGOS_pp(
         masks_ins.grad.zero_()
 
         # Compute the integrated gradient for the combined mask, optimized for insertion
-        loss_comb_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor)
+        loss_comb_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
         total_grads1 -= masks_del.grad.clone()  # Negative because insertion loss is 1 - score.
         total_grads2 -= masks_ins.grad.clone()
@@ -575,13 +627,13 @@ def iGOS_pp(
         masks_ins.grad.zero_()
 
         # Compute the integrated gradient for the deletion mask
-        loss_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1, ig_iter, positions=positions, processor=processor)
+        loss_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
         total_grads1 += masks_del.grad.clone()
         masks_del.grad.zero_()
 
         # Compute the integrated graident for the insertion mask
-        loss_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks2, ig_iter, positions=positions, processor=processor)
+        loss_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
         total_grads2 -= masks_ins.grad.clone()
         masks_ins.grad.zero_()
