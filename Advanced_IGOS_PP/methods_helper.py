@@ -352,9 +352,6 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
     if torch.isnan(image).any():
         print(f"[NaN DEBUG] pred_probs: input image contains NaN!")
         print(f"  image shape: {image.shape}, NaN count: {torch.isnan(image).sum().item()}")
-        # [FIX] Replace NaN with zeros to prevent propagation
-        image = torch.nan_to_num(image, nan=0.0)
-        inputs_new['pixel_values'] = image
     
     # Forward calculation to get all logits (including the logits of the input part)
     if need_grad:
@@ -379,8 +376,6 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
         print(f"  all_logits shape: {all_logits.shape}, NaN count: {torch.isnan(all_logits).sum().item()}")
         if not torch.isnan(all_logits).all():
             print(f"  logits range: [{all_logits[~torch.isnan(all_logits)].min().item():.4f}, {all_logits[~torch.isnan(all_logits)].max().item():.4f}]")
-        # [FIX] Replace NaN with zeros to prevent propagation
-        all_logits = torch.nan_to_num(all_logits, nan=0.0)
     
     returned_logits = all_logits[:, target_token_position - 1] # The reason for the minus 1 is that the generated content is in the previous position
     

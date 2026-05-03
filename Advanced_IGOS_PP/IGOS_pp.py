@@ -146,15 +146,15 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     init_posi = 0
     init_val = 0.
     L1 = 0.5
-    L2 = 60
-    gamma = 0.5
-    L3 = 30
+    L2 = 0.1
+    gamma = 1.0
+    L3 = 10
     momentum = 5
     ig_iter = 20
     # 将 ig_iter 拆成多段依次 backward，显存峰值约按段数下降；须满足 ig_iter % ig_chunks == 0
     ig_chunks = 2
     iterations=10
-    lr=0.1
+    lr=1.0
     
     method = iGOS_pp
     
@@ -553,8 +553,6 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
         # [DEBUG] Check single_input for NaN
         if torch.isnan(single_input).any():
             print(f"[NaN DEBUG] interval_score: single_input (iter {idx}) contains NaN after processor!")
-            # [FIX] Replace NaN with zeros
-            single_input = torch.nan_to_num(single_input, nan=0.0)
         
         # [FIX] Use return_log_probs=True for better numerical stability
         log_probs = pred_probs(model, inputs, generated_ids, single_input, target_token_position, selected_token_word_id, need_grad=True, return_log_probs=True)
@@ -563,11 +561,6 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
         if torch.isnan(log_probs).any():
             print(f"[NaN DEBUG] interval_score: log_probs (iter {idx}) contain NaN!")
             print(f"  positions: {positions}")
-            # [FIX] Replace NaN with a large negative value (equivalent to very small prob)
-            log_probs = torch.nan_to_num(log_probs, nan=-20.0)
-        
-        # [FIX] Clamp log_probs to prevent extreme values
-        log_probs = torch.clamp(log_probs, min=-20.0, max=0.0)
         
         losses += log_probs[positions].sum()
         
@@ -870,7 +863,6 @@ def iGOS_pp(
             total_grads = torch.cat((total_grads1.unsqueeze(1), total_grads2.unsqueeze(1)), 1)
             lrs = line_search(masks, total_grads, loss_function, lr)
             
-            torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=0.1)
             masks_del.data -= total_grads1 * lrs
             masks_ins.data -= total_grads2 * lrs
         
@@ -881,14 +873,11 @@ def iGOS_pp(
             if torch.isnan(total_grads2).any():
                 print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads2 contains NaN before clip!")
             
-            torch.nn.utils.clip_grad_norm_([total_grads1, total_grads2], max_norm=0.1)
-            
-            # [DEBUG] Check total_grads after clip (clip may not fix NaN)
+            # [DEBUG] Check total_grads（不再进行全局范数裁剪，避免更新步长被压缩）
             if torch.isnan(total_grads1).any():
-                print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads1 STILL contains NaN after clip!")
-                print(f"  This is likely the ROOT CAUSE - gradients became NaN and clip cannot fix it")
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads1 contains NaN before NAG update!")
             if torch.isnan(total_grads2).any():
-                print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads2 STILL contains NaN after clip!")
+                print(f"[NaN DEBUG] iGOS_pp iter {i}: total_grads2 contains NaN before NAG update!")
             
             e = i / (i + momentum)
             cita_d_p = cita_d
