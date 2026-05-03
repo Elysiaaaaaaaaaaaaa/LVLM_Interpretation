@@ -1,4 +1,5 @@
 import math
+import os
 from torch.autograd import Variable
 from .methods_helper import *
 from .utils import *
@@ -96,7 +97,7 @@ def tensor2pack(patches: torch.Tensor) -> torch.Tensor:
 
     return flatten_patches
 
-def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, positions=None, select_word_id=None):
+def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, positions=None, select_word_id=None, iter_vis_save_prefix=None):
     """_summary_
 
     Args:
@@ -282,7 +283,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
                 image_size=image_size,
                 positions=keyword,
                 resolution=None,
-                processor=tensor2pack
+                processor=tensor2pack,
+                iter_vis_save_prefix=iter_vis_save_prefix,
             )
         # masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
         #     model=model,
@@ -657,6 +659,46 @@ def integrated_gradient(model, inputs, generated_ids, image, target_token_positi
         print(f"[NaN DEBUG] integrated_gradient: final total_loss is NaN!")
     return total_loss
 
+
+def _dump_iter_heatmap(masks_del, masks_ins, image_tensor, iteration_idx, iter_vis_save_prefix):
+    """
+    将当前 (masks_del * masks_ins) 按与 gen_explanations_qwenvl 末尾一致的口径叠图并保存（BGR，供 cv2.imwrite）。
+    image_tensor: [B,3,H,W]，CLIP 归一化域，与 pil_to_clip_tensor_bcwh 一致。
+    """
+    with torch.no_grad():
+        masks = (masks_del * masks_ins).detach()[0, 0].float().cpu().numpy()
+    mask_min = float(np.min(masks))
+    mask_max = float(np.max(masks))
+    if mask_max > mask_min:
+        masks = (masks - mask_min) / (mask_max - mask_min)
+    else:
+        masks = np.zeros_like(masks)
+
+    mean = np.asarray(OPENAI_CLIP_MEAN, dtype=np.float32).reshape(3, 1, 1)
+    std = np.asarray(OPENAI_CLIP_STD, dtype=np.float32).reshape(3, 1, 1)
+    img_chw = image_tensor[0].detach().float().cpu().numpy()
+    rgb = img_chw * std + mean
+    rgb = np.clip(rgb * 255.0, 0, 255).astype(np.uint8)
+    rgb_hwc = np.transpose(rgb, (1, 2, 0))
+    H, W = rgb_hwc.shape[:2]
+    original_bgr = cv2.cvtColor(rgb_hwc, cv2.COLOR_RGB2BGR)
+
+    masks = cv2.resize(masks.astype(np.float32), (W, H))
+    masks = np.nan_to_num(masks, nan=0.0)
+    vis_gamma = 0.4
+    masks = np.power(np.clip(masks, 0.0, 1.0), vis_gamma)
+    heatmap = np.uint8(255 * np.clip(1.0 - masks, 0.0, 1.0))
+    heatmap_bgr = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+    superimposed = heatmap_bgr.astype(np.float32) * 0.35 + original_bgr.astype(np.float32) * 0.65
+    superimposed = np.clip(superimposed, 0, 255).astype(np.uint8)
+
+    save_dir = os.path.dirname(iter_vis_save_prefix)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+    out_path = f"{iter_vis_save_prefix}_iter_{iteration_idx:03d}.jpg"
+    cv2.imwrite(out_path, superimposed)
+
+
 def iGOS_pp(
         model,
         inputs, 
@@ -736,6 +778,7 @@ def iGOS_pp(
     image_size = kwargs.get('image_size', None)
     positions = kwargs.get('positions', None)
     resolution = kwargs.get('resolution', None)
+    iter_vis_save_prefix = kwargs.get('iter_vis_save_prefix', None)
 
     
     if opt == 'NAG':
@@ -748,6 +791,8 @@ def iGOS_pp(
     positions = kwargs.get('positions', None)
     losses_del, losses_ins, losses_l1, losses_tv, losses_l2, losses_comb_del, losses_comb_ins = [], [], [], [], [], [], []
     for i in range(iterations):
+        if iter_vis_save_prefix is not None and i % 5 == 0 and i != iterations - 1:
+            _dump_iter_heatmap(masks_del, masks_ins, image, i, iter_vis_save_prefix)
         up_masks1 = upscale(masks_del, image)
         up_masks2 = upscale(masks_ins, image)
 
