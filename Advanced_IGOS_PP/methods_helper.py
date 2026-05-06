@@ -4,6 +4,9 @@ Helper function for the IGOS explanation methods.
 Modified from Tyler Lawson, Saeed khorram. https://github.com/saeed-khorram/IGOS
 """
 
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+
 import torch
 import torchvision.transforms as transforms
 import torch.nn.functional as F
