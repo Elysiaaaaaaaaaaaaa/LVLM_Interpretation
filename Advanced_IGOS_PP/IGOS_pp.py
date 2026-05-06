@@ -97,7 +97,17 @@ def tensor2pack(patches: torch.Tensor) -> torch.Tensor:
 
     return flatten_patches
 
-def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, positions=None, select_word_id=None, iter_vis_save_prefix=None):
+def gen_explanations_qwenvl(
+    model,
+    processor,
+    image,
+    text_prompt,
+    tokenizer,
+    positions=None,
+    select_word_id=None,
+    iter_vis_save_prefix=None,
+    args=None,
+):
     """_summary_
 
     Args:
@@ -141,21 +151,21 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     # iterations=10
     # lr=1.0  # 降低学习率以防止梯度爆炸
 
-    size=32
-    opt = 'NAG'
-    diverse_k = 1
-    init_posi = 0
-    init_val = 0.
-    L1 = 0.5
-    L2 = 0.1
-    gamma = 1.0
-    L3 = 10
-    momentum = 5
-    ig_iter = 20
+    size       = args.size        if args is not None else 32
+    opt        = args.opt         if args is not None else 'NAG'
+    diverse_k  = args.diverse_k   if args is not None else 1
+    init_posi  = args.init_posi   if args is not None else 0
+    init_val   = args.init_val    if args is not None else 0.0
+    L1         = args.L1          if args is not None else 0.5
+    L2         = args.L2          if args is not None else 0.1
+    gamma      = args.gamma       if args is not None else 1.0
+    L3         = args.L3          if args is not None else 10
+    momentum   = args.momentum    if args is not None else 5
+    ig_iter    = args.ig_iter     if args is not None else 20
     # 将 ig_iter 拆成多段依次 backward，显存峰值约按段数下降；须满足 ig_iter % ig_chunks == 0
-    ig_chunks = 2
-    iterations=15
-    lr = 0.5
+    ig_chunks  = args.ig_chunks   if args is not None else 2
+    iterations = args.iterations  if args is not None else 5
+    lr         = args.lr          if args is not None else 0.5
     
     method = iGOS_pp
     
