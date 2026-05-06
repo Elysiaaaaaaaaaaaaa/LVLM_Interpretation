@@ -375,7 +375,8 @@ def pred_probs(
             all_logits = outputs.logits  # [batch_size, seq_len, vocab_size]
     
     returned_logits = all_logits[:, target_token_position - 1]  # minus 1: generated token logits at previous position
-    returned_logits = returned_logits.float()
+    # NOTE: PyTorch CUDA softmax/log_softmax 内部使用 fp32 accumulator，bf16 输入数值稳定；
+    # 不在这里 .float()，否则整张 [1, N, vocab] 升级 fp32 会让 retain_graph 显存翻倍 OOM。
     if return_log_probs:
         returned_logits = F.log_softmax(returned_logits, dim=-1)
     else:

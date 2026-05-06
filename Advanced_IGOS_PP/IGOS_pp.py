@@ -119,7 +119,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     ig_iter = 10
     iterations=5
     lr = 10.0
-    ig_chunks = 5
+    ig_chunks = 2
     save_interval = None  # int: save every k iters; None: skip intermediate snapshots
 
     method = iGOS_pp
