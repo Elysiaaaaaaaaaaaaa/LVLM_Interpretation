@@ -155,7 +155,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     # 将 ig_iter 拆成多段依次 backward，显存峰值约按段数下降；须满足 ig_iter % ig_chunks == 0
     ig_chunks = 2
     iterations=10
-    lr=1.0
+    lr=0.1
     
     method = iGOS_pp
     
@@ -696,7 +696,8 @@ def _dump_iter_heatmap(masks_del, masks_ins, image_tensor, iteration_idx, iter_v
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
     out_path = f"{iter_vis_save_prefix}_iter_{iteration_idx:03d}.jpg"
-    cv2.imwrite(out_path, superimposed)
+    if not cv2.imwrite(out_path, superimposed):
+        print(f"[iter_vis] cv2.imwrite failed (路径或编码问题?): {out_path}")
 
 
 def iGOS_pp(

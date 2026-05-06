@@ -94,18 +94,19 @@ def main(args):
         
         image_path = os.path.join(args.Datasets, content["image_path"])
         text_prompt = content["question"]
-        
-        image = Image.open(image_path).convert('RGB')
-        
-        heatmap, superimposed_img = explainer(model, processor, image, text_prompt, tokenizer)
 
-        # 确保保存目录存在
         npy_save_path = os.path.join(save_npy_root_path, content["image_path"].replace(".jpg", ".npy"))
         vis_save_path = os.path.join(save_vis_root_path, content["image_path"])
-        
-        # 创建必要的子目录
         os.makedirs(os.path.dirname(npy_save_path), exist_ok=True)
         os.makedirs(os.path.dirname(vis_save_path), exist_ok=True)
+        iter_prefix = os.path.splitext(vis_save_path)[0]
+
+        image = Image.open(image_path).convert('RGB')
+
+        heatmap, superimposed_img = explainer(
+            model, processor, image, text_prompt, tokenizer,
+            iter_vis_save_prefix=iter_prefix,
+        )
         
         # Save npy file
         np.save(npy_save_path, np.array(heatmap))
