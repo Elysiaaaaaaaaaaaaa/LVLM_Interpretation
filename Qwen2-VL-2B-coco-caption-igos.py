@@ -17,7 +17,7 @@ from torch import nn
 import torchvision.transforms.functional as TF
 
 import numpy as np
-from utils import SubRegionDivision, mkdir
+from utils import mkdir
 
 from tqdm import tqdm
 
@@ -61,7 +61,7 @@ def main(args):
 
     explainer = gen_explanations_qwenvl
     
-    with open(args.eval_list, "r") as f:
+    with open(args.eval_list, "r", encoding="utf-8") as f:
         contents = json.load(f)
         
     save_dir = args.save_dir

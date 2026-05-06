@@ -42,6 +42,11 @@ def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
+def mkdir(path):
+    """Create ``path`` and any missing parents; no-op if the directory already exists."""
+    os.makedirs(path, exist_ok=True)
+
+
 def get_data(args, row):
     if args.dataset == 'MMVP':
         photo_id = row['lndex']

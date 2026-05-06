@@ -193,7 +193,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     selected_token_id = [i for i in range(len(selected_token_word_id))]
     target_token_position = np.array(selected_token_id) + len(inputs['input_ids'][0])
     
-    if positions == None:
+    if positions is None:
         positions, keywords = find_keywords(model, inputs, generated_ids, generated_ids_trimmed, image_tensor, blur_tensor, target_token_position, selected_token_word_id, tokenizer)
     else:
         keywords = processor.batch_decode(
@@ -202,7 +202,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     
     print(keywords)
     
-    if select_word_id != None:
+    if select_word_id is not None:
         for position, word_id in zip(positions, select_word_id):
             generated_ids_trimmed[0][position] = word_id
     
@@ -248,7 +248,8 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         
         masks = masks[0,0].detach().cpu().numpy()
         masks -= np.min(masks)
-        masks /= np.max(masks)
+        if np.max(masks) > 0:
+            masks /= np.max(masks)
         
         image = np.array(image)
         masks = cv2.resize(masks, (image.shape[1], image.shape[0]))
@@ -327,7 +328,7 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
     selected_token_id = [i for i in range(len(selected_token_word_id))]
     target_token_position = np.array(selected_token_id) + len(inputs['input_ids'][0])
     
-    if positions == None:
+    if positions is None:
         positions, keywords = find_keywords(model, inputs, generated_ids, generated_ids_trimmed, image_tensor, blur_tensor, target_token_position, selected_token_word_id, tokenizer)
     else:
         keywords = processor.batch_decode(
@@ -337,7 +338,7 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
     
     print(keywords)
     
-    if select_word_id != None:
+    if select_word_id is not None:
         for position, word_id in zip(positions, select_word_id):
             generated_ids_trimmed[0][position] = word_id
     
@@ -405,7 +406,8 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
         
         masks = masks[0,0].detach().cpu().numpy()
         masks -= np.min(masks)
-        masks /= np.max(masks)
+        if np.max(masks) > 0:
+            masks /= np.max(masks)
         
         image = np.array(image)
         masks = cv2.resize(masks, (image.shape[1], image.shape[0]))
@@ -448,7 +450,7 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
     for single_img in local_images:
         # single_img = single_img.half()
         
-        if processor == None:
+        if processor is None:
             single_input = single_img
         else:
             single_input = processor(single_img)
@@ -586,11 +588,12 @@ def iGOS_pp(
         loss += ins_loss_function(up_masks[:, 0] * up_masks[:, 1], indices)
         return loss + regularization_loss(image[indices], masks[:, 0] * masks[:, 1])
 
-    masks_del = torch.ones((1, 1, size, size), dtype=torch.float32, device='cuda')
-    masks_del = masks_del * init_mask.cuda()
+    device = image.device
+    masks_del = torch.ones((1, 1, size, size), dtype=torch.float32, device=device)
+    masks_del = masks_del * init_mask.to(device)
     masks_del = Variable(masks_del, requires_grad=True)
-    masks_ins = torch.ones((image.shape[0], 1, size, size), dtype=torch.float32, device='cuda')
-    masks_ins = masks_ins * init_mask.cuda()
+    masks_ins = torch.ones((image.shape[0], 1, size, size), dtype=torch.float32, device=device)
+    masks_ins = masks_ins * init_mask.to(device)
     masks_ins = Variable(masks_ins, requires_grad=True)
     prompt = kwargs.get('prompt', None)
     image_size = kwargs.get('image_size', None)
@@ -599,8 +602,8 @@ def iGOS_pp(
 
     
     if opt == 'NAG':
-        cita_d=torch.zeros(1).cuda()
-        cita_i=torch.zeros(1).cuda()
+        cita_d = torch.zeros(1, device=device)
+        cita_i = torch.zeros(1, device=device)
     
     prompt = kwargs.get('prompt', None)
     image_size = kwargs.get('image_size', None)
