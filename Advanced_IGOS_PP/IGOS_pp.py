@@ -155,7 +155,7 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     # 将 ig_iter 拆成多段依次 backward，显存峰值约按段数下降；须满足 ig_iter % ig_chunks == 0
     ig_chunks = 2
     iterations=10
-    lr=0.1
+    lr = 0.5
     
     method = iGOS_pp
     
