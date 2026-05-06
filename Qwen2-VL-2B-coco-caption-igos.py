@@ -2,6 +2,8 @@ import os
 # Set the huggingface mirror and cache path
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com" # for Chinese
 os.environ["HF_HOME"] = "./model_checkpoint/hf_cache"
+os.environ["TRANSFORMERS_NO_TF"] = "1"
+os.environ["TRANSFORMERS_NO_FLAX"] = "1"
 
 import cv2
 import json
