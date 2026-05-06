@@ -118,9 +118,10 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
     momentum = 5
     ig_iter = 10
     iterations=5
-    lr=0.001
-    ig_chunks=2
-    
+    lr = 10.0
+    ig_chunks = 2
+    save_interval = None  # int: save every k iters; None: skip intermediate snapshots
+
     method = iGOS_pp
     
     i_obj = 0
@@ -221,13 +222,15 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
         label = label.unsqueeze(0)
         keyword = pred_data['keywords']
         now = time.time()
-        masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
+        masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins, intermediate_masks = (
+            method(
                 model=model,
-                inputs = inputs, 
+                inputs=inputs,
                 generated_ids=generated_ids,
-                init_mask=pred_data['init_masks'][0],
+                init_mask=pred_data["init_masks"][0],
                 image=pil_to_clip_tensor_bcwh(image).to(model.device),
-                target_token_position=target_token_position, selected_token_word_id=selected_token_word_id,
+                target_token_position=target_token_position,
+                selected_token_word_id=selected_token_word_id,
                 baseline=pil_to_clip_tensor_bcwh(blur).to(model.device),
                 label=label,
                 size=size,
@@ -242,26 +245,36 @@ def gen_explanations_qwenvl(model, processor, image, text_prompt, tokenizer, pos
                 image_size=image_size,
                 positions=keyword,
                 resolution=None,
-                processor=tensor2pack
+                processor=tensor2pack,
+                save_interval=save_interval,
             )
+        )
         total_time += time.time() - now
-        
-        masks = masks[0,0].detach().cpu().numpy()
-        masks -= np.min(masks)
-        if np.max(masks) > 0:
-            masks /= np.max(masks)
-        
-        image = np.array(image)
-        masks = cv2.resize(masks, (image.shape[1], image.shape[0]))
-        
-        heatmap = np.uint8(255 * (1-masks))  
-        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-        original_image = image
-        superimposed_img = heatmap * 0.4 + original_image
-        superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
-        # cv2.imwrite("igos++.jpg", superimposed_img)
-        
-    return masks, superimposed_img
+
+        def _mask_to_outputs(mask_tensor, original_image_pil):
+            m = mask_tensor[0, 0].detach().cpu().numpy()
+            m = np.nan_to_num(m, nan=0.0, posinf=1.0, neginf=0.0)
+            m_min, m_max = np.min(m), np.max(m)
+            if m_max > m_min:
+                m = (m - m_min) / (m_max - m_min)
+            else:
+                m = np.zeros_like(m)
+            img_np = np.array(original_image_pil.convert("RGB"))
+            m = cv2.resize(m, (img_np.shape[1], img_np.shape[0]))
+            hm = np.uint8(255 * np.clip(1.0 - m, 0.0, 1.0))
+            hm = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
+            sup = np.clip(hm * 0.4 + img_np, 0, 255).astype(np.uint8)
+            return m, sup
+
+        original_pil = image
+        final_mask, superimposed_img = _mask_to_outputs(masks, original_pil)
+
+        intermediate_results = []
+        for iter_idx, mid_mask in intermediate_masks:
+            mid_m, mid_sup = _mask_to_outputs(mid_mask, original_pil)
+            intermediate_results.append((iter_idx, mid_m, mid_sup))
+
+    return final_mask, superimposed_img, intermediate_results
 
 def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, positions=None, select_word_id=None):
     input_size = (image.size[1], image.size[0])
@@ -379,7 +392,7 @@ def gen_explanations_internvl(model, processor, image, text_prompt, tokenizer, p
         label = label.unsqueeze(0)
         keyword = pred_data['keywords']
         now = time.time()
-        masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins = method(
+        masks, loss_del, loss_ins, loss_l1, loss_tv, loss_l2, loss_comb_del, loss_comb_ins, _intermediate_masks = method(
                 model=model,
                 inputs = inputs, 
                 generated_ids=generated_ids,
@@ -455,9 +468,17 @@ def interval_score(model, inputs, generated_ids, images, target_token_position, 
         else:
             single_input = processor(single_img)
         
-        probs = pred_probs(model, inputs, generated_ids, single_input, target_token_position, selected_token_word_id, need_grad=True)
-        #losses += probs[positions].mean()
-        losses += torch.log(probs)[positions].sum()
+        log_probs = pred_probs(
+            model,
+            inputs,
+            generated_ids,
+            single_input,
+            target_token_position,
+            selected_token_word_id,
+            need_grad=True,
+            return_log_probs=True,
+        )
+        losses += log_probs[positions].sum()
 
     return losses / num_iter
 
@@ -518,6 +539,15 @@ def integrated_gradient(model, inputs, generated_ids, image, target_token_positi
         up_masks.backward(up_masks_detached.grad, retain_graph=True)
     return total_loss
 
+def _safe_grad(p):
+    """Read grad, sanitize NaN/Inf, zero grads. None -> zeros."""
+    if p.grad is None:
+        return torch.zeros_like(p)
+    g = torch.nan_to_num(p.grad.clone(), nan=0.0, posinf=0.0, neginf=0.0)
+    p.grad.zero_()
+    return g
+
+
 def iGOS_pp(
         model,
         inputs, 
@@ -539,6 +569,7 @@ def iGOS_pp(
         opt='LS',
         softmax=True,
         processor=None,
+        save_interval=None,
         **kwargs):
 
     L2 = 0.1
@@ -609,6 +640,7 @@ def iGOS_pp(
     image_size = kwargs.get('image_size', None)
     positions = kwargs.get('positions', None)
     losses_del, losses_ins, losses_l1, losses_tv, losses_l2, losses_comb_del, losses_comb_ins = [], [], [], [], [], [], []
+    intermediate_masks = []
     for i in range(iterations):
         up_masks1 = upscale(masks_del, image)
         up_masks2 = upscale(masks_ins, image)
@@ -616,30 +648,24 @@ def iGOS_pp(
         # Compute the integrated gradient for the combined mask, optimized for deletion
         loss_comb_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
-        total_grads1 = masks_del.grad.clone()
-        total_grads2 = masks_ins.grad.clone()
-        masks_del.grad.zero_()
-        masks_ins.grad.zero_()
+        total_grads1 = _safe_grad(masks_del)
+        total_grads2 = _safe_grad(masks_ins)
 
         # Compute the integrated gradient for the combined mask, optimized for insertion
         loss_comb_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1 * up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
-        total_grads1 -= masks_del.grad.clone()  # Negative because insertion loss is 1 - score.
-        total_grads2 -= masks_ins.grad.clone()
-        masks_del.grad.zero_()
-        masks_ins.grad.zero_()
+        total_grads1 -= _safe_grad(masks_del)  # Negative because insertion loss is 1 - score.
+        total_grads2 -= _safe_grad(masks_ins)
 
         # Compute the integrated gradient for the deletion mask
         loss_del = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks1, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
-        total_grads1 += masks_del.grad.clone()
-        masks_del.grad.zero_()
+        total_grads1 += _safe_grad(masks_del)
 
         # Compute the integrated graident for the insertion mask
         loss_ins = integrated_gradient(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, baseline, up_masks2, ig_iter, positions=positions, processor=processor, ig_chunks=ig_chunks)
         
-        total_grads2 -= masks_ins.grad.clone()
-        masks_ins.grad.zero_()
+        total_grads2 -= _safe_grad(masks_ins)
 
         # Average them to balance out the terms with the regularization terms
         total_grads1 /= 2
@@ -650,8 +676,8 @@ def iGOS_pp(
         loss_l1, loss_tv, loss_l2 = regularization_loss(image, masks_del * masks_ins)
         losses = loss_l1 + loss_tv + loss_l2
         losses.sum().backward()
-        total_grads1 += masks_del.grad.clone()
-        total_grads2 += masks_ins.grad.clone()
+        total_grads1 += _safe_grad(masks_del)
+        total_grads2 += _safe_grad(masks_ins)
 
         if opt == 'LS':
             masks = torch.cat((masks_del.unsqueeze(1), masks_ins.unsqueeze(1)), 1)
@@ -671,8 +697,17 @@ def iGOS_pp(
 
         masks_del.grad.zero_()
         masks_ins.grad.zero_()
-        masks_del.data.clamp_(0,1)
-        masks_ins.data.clamp_(0,1)
+        masks_del.data = torch.nan_to_num(masks_del.data, nan=0.5)
+        masks_ins.data = torch.nan_to_num(masks_ins.data, nan=0.5)
+        masks_del.data.clamp_(0, 1)
+        masks_ins.data.clamp_(0, 1)
+
+        if (
+            save_interval is not None
+            and (i + 1) % save_interval == 0
+            and (i + 1) != iterations
+        ):
+            intermediate_masks.append((i + 1, (masks_del * masks_ins).detach().cpu().clone()))
 
         losses_del.append(loss_del)
         losses_ins.append(loss_ins)
@@ -683,6 +718,15 @@ def iGOS_pp(
         losses_l2.append(loss_l2.item())
         print(f'iteration: {i} lr: {lr:.4f} loss_comb_del: {loss_comb_del:.4f}, loss_comb_ins: {loss_comb_ins:.4f}, loss_del: {loss_del:.4f}, loss_ins: {loss_ins:.4f}, loss_l1: {loss_l1.item():.4f}, loss_tv: {loss_tv.item():.4f}, loss_l2: {loss_l2.item():.4f}')
 
-    return masks_del * masks_ins, losses_del, losses_ins, losses_l1, losses_tv, losses_l2, losses_comb_del, losses_comb_ins
-
+    return (
+        masks_del * masks_ins,
+        losses_del,
+        losses_ins,
+        losses_l1,
+        losses_tv,
+        losses_l2,
+        losses_comb_del,
+        losses_comb_ins,
+        intermediate_masks,
+    )
 

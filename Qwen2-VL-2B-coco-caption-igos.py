@@ -48,7 +48,7 @@ def main(args):
     # Load Qwen2-VL
     # default: Load the model on the available device(s)
     model = Qwen2VLForConditionalGeneration.from_pretrained(
-        "Qwen/Qwen2-VL-2B-Instruct", torch_dtype=torch.float16, device_map="auto"
+        "Qwen/Qwen2-VL-2B-Instruct", torch_dtype=torch.bfloat16, device_map="auto"
     )
     model.eval()
     
@@ -88,15 +88,25 @@ def main(args):
         
         image = Image.open(image_path).convert('RGB')
         
-        heatmap, superimposed_img = explainer(model, processor, image, text_prompt, tokenizer)
-
-        # Save npy file
-        np.save(
-            os.path.join(save_npy_root_path, content["image_path"].replace(".jpg", ".npy")),
-            np.array(heatmap)
+        heatmap, superimposed_img, intermediate_results = explainer(
+            model, processor, image, text_prompt, tokenizer
         )
-        
-        cv2.imwrite(os.path.join(save_vis_root_path, content["image_path"]), superimposed_img)
+
+        npy_save_path = os.path.join(
+            save_npy_root_path, content["image_path"].replace(".jpg", ".npy")
+        )
+        vis_save_path = os.path.join(save_vis_root_path, content["image_path"])
+        os.makedirs(os.path.dirname(npy_save_path), exist_ok=True)
+        os.makedirs(os.path.dirname(vis_save_path), exist_ok=True)
+
+        np.save(npy_save_path, np.array(heatmap))
+        cv2.imwrite(vis_save_path, superimposed_img)
+
+        npy_stem, npy_ext = os.path.splitext(npy_save_path)
+        vis_stem, vis_ext = os.path.splitext(vis_save_path)
+        for iter_idx, mid_heatmap, mid_super in intermediate_results:
+            np.save(f"{npy_stem}_iter{iter_idx}{npy_ext}", np.array(mid_heatmap))
+            cv2.imwrite(f"{vis_stem}_iter{iter_idx}{vis_ext}", mid_super)
         
 if __name__ == "__main__":
     args = parse_args()

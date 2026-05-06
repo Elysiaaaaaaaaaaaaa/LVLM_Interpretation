@@ -339,7 +339,16 @@ def score_output(args, image, image_size, model, model_name, l, label, prompt, p
     scores = probs_pred[:, torch.tensor(positions).to(probs_pred.device)].sum(-1) 
     return scores / len(positions)
 
-def pred_probs(model, inputs, generated_ids, image, target_token_position, selected_token_word_id, need_grad=False):
+def pred_probs(
+    model,
+    inputs,
+    generated_ids,
+    image,
+    target_token_position,
+    selected_token_word_id,
+    need_grad=False,
+    return_log_probs=False,
+):
     inputs_new = inputs.copy()
     
     inputs_new['input_ids'] = generated_ids
@@ -365,8 +374,12 @@ def pred_probs(model, inputs, generated_ids, image, target_token_position, selec
             )
             all_logits = outputs.logits  # [batch_size, seq_len, vocab_size]
     
-    returned_logits = all_logits[:, target_token_position - 1] # The reason for the minus 1 is that the generated content is in the previous position
-    returned_logits = F.softmax(returned_logits, dim=-1)
+    returned_logits = all_logits[:, target_token_position - 1]  # minus 1: generated token logits at previous position
+    returned_logits = returned_logits.float()
+    if return_log_probs:
+        returned_logits = F.log_softmax(returned_logits, dim=-1)
+    else:
+        returned_logits = F.softmax(returned_logits, dim=-1)
     
     selected_token_word_id = torch.tensor(selected_token_word_id).to(model.device)
     indices = selected_token_word_id.unsqueeze(0).unsqueeze(-1) # [1, N, 1]
