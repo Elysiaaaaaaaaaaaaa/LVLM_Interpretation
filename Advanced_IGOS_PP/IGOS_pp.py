@@ -330,6 +330,7 @@ def gen_explanations_qwenvl(
             masks /= (mask_max - mask_min)
         else:
             # 如果所有值都相同，设置为默认值
+            print(f"[Warning] All values in masks are the same: {mask_min}")
             masks = np.zeros_like(masks)
         
         image = np.array(image)
