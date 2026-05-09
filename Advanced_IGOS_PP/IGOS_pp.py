@@ -778,7 +778,7 @@ def iGOS_pp(
         loss += ins_loss_function(up_masks[:, 0] * up_masks[:, 1], indices)
         return loss + regularization_loss(image[indices], masks[:, 0] * masks[:, 1])
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = image.device
     masks_del = torch.ones((1, 1, size, size), dtype=torch.float32, device=device)
     masks_del = masks_del * init_mask.to(device)
     masks_del = Variable(masks_del, requires_grad=True)
