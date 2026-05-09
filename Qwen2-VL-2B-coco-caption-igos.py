@@ -54,6 +54,8 @@ def parse_args():
     parser.add_argument('--ig-chunks', type=int, default=2)
     parser.add_argument('--iterations', type=int, default=5)
     parser.add_argument('--lr', type=float, default=0.5)
+    parser.add_argument('--resume', action='store_true', default=False,
+                        help='Resume from checkpoint: skip images whose .npy already exists.')
     args = parser.parse_args()
     return args
 
@@ -101,7 +103,7 @@ def main(args):
     # mkdir(visualization_root_path)
     
     for content in tqdm(contents):
-        if os.path.exists(
+        if args.resume and os.path.exists(
             os.path.join(save_npy_root_path, content["image_path"].replace(".jpg", ".npy"))
         ):
             continue
