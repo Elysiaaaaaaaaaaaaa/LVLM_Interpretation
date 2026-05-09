@@ -45,7 +45,6 @@ def bilateral_tv_norm(image, mask, tv_beta=2, sigma=1):
     :return:
     """
     # tv term
-    mask = mask.to(image.device)
     mask_ = mask[:, 0, :]
     a = torch.mean(torch.abs((mask_[:, :-1, :] - mask_[:, 1:, :]).view(mask.shape[0], -1)).pow(tv_beta), dim=1)
     b = torch.mean(torch.abs((mask_[:, :, :-1] - mask_[:, :, 1:]).view(mask.shape[0], -1)).pow(tv_beta), dim=1)

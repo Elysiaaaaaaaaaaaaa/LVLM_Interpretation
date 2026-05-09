@@ -70,7 +70,7 @@ def main(args):
     model = Qwen2VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2-VL-2B-Instruct",
         quantization_config=quantization_config,
-        torch_dtype=torch.float32,
+        torch_dtype=torch.float16,
         device_map="auto"
     )
     model.eval()
