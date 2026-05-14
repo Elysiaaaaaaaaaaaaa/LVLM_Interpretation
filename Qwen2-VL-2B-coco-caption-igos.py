@@ -14,9 +14,12 @@ from PIL import Image
 import logging
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
-# 禁用 huggingface_hub 下载进度条
-from huggingface_hub import disable_progress_bars
-disable_progress_bars()
+# 禁用 huggingface_hub 下载进度条（兼容新旧版本）
+try:
+    from huggingface_hub import disable_progress_bars
+    disable_progress_bars()
+except ImportError:
+    pass
 
 from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor, BitsAndBytesConfig
 from qwen_vl_utils import process_vision_info
