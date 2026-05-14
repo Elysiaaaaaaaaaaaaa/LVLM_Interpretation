@@ -4,14 +4,22 @@ import os
 os.environ["HF_HOME"] = "./model_checkpoint/hf_cache"
 # 缓解显存碎片化问题
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+# 抑制 transformers/huggingface_hub 加载权重时的 INFO/WARNING 日志
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 
 import cv2
 import json
 from PIL import Image
 
-from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor
+import logging
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
+# 禁用 huggingface_hub 下载进度条
+from huggingface_hub import disable_progress_bars
+disable_progress_bars()
+
+from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor, BitsAndBytesConfig
 from qwen_vl_utils import process_vision_info
-from transformers import BitsAndBytesConfig
 import argparse
 import torch
 from torch import nn
