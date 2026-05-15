@@ -37,6 +37,7 @@ from Advanced_IGOS_PP.utils import *
 from Advanced_IGOS_PP.methods_helper import *
 from Advanced_IGOS_PP.IGOS_pp import *
 
+transformers.logging.set_verbosity_error()
 def parse_args():
     parser = argparse.ArgumentParser(description='Explanation for Qwen2-VL')
     # general
