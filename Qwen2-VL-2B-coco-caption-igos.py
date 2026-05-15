@@ -4,22 +4,11 @@ import os
 os.environ["HF_HOME"] = "./model_checkpoint/hf_cache"
 # 缓解显存碎片化问题
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
-# 抑制 transformers/huggingface_hub 加载权重时的 INFO/WARNING 日志
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
 import cv2
 import json
 from PIL import Image
-
-import logging
-logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
-logging.getLogger("transformers").setLevel(logging.ERROR)
-# 禁用 huggingface_hub 下载进度条（兼容新旧版本）
-try:
-    from huggingface_hub import disable_progress_bars
-    disable_progress_bars()
-except ImportError:
-    pass
 
 from transformers import Qwen2VLForConditionalGeneration, AutoTokenizer, AutoProcessor, BitsAndBytesConfig
 from qwen_vl_utils import process_vision_info
@@ -37,7 +26,6 @@ from Advanced_IGOS_PP.utils import *
 from Advanced_IGOS_PP.methods_helper import *
 from Advanced_IGOS_PP.IGOS_pp import *
 
-transformers.logging.set_verbosity_error()
 def parse_args():
     parser = argparse.ArgumentParser(description='Explanation for Qwen2-VL')
     # general
