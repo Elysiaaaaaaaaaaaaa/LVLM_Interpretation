@@ -497,17 +497,27 @@ def find_keywords(model, inputs, generated_ids, output_ids, image, blur_image, t
         print(f"  zero count: {(probs_blur <= 0).sum().item()}, min: {probs_blur.min().item():.2e}")
 
     # condition = (probs_blur <= 0.4*probs) & (~torch.isin(output_ids[0], torch.tensor(special_ids).to(probs.device)))
-    key_word_threshold = 6.0
+    key_word_threshold = 8.0
     condition = (torch.log(probs)-torch.log(probs_blur) > key_word_threshold)& (probs>=0.0) & (~torch.isin(output_ids[0], torch.tensor(special_ids).to(probs.device)))
     positions = torch.where(condition)[0].tolist()
     save_keyword_score_distribution(output_ids, probs, probs_blur, key_word_threshold, tokenizer)
     
+    # if len(positions) == 0:
+    #     idx = torch.argmax(probs-probs_blur).item()
+    #     positions = [idx]
+    
+    # keywords = [tokenizer.decode(output_ids[0][idx]).strip() for idx in positions]
+    
+    # return positions, keywords
     if len(positions) == 0:
-        idx = torch.argmax(probs-probs_blur).item()
+        scores = torch.log(probs) - torch.log(probs_blur)
+        is_special = torch.isin(output_ids[0], torch.tensor(special_ids).to(probs.device))
+        scores[is_special] = -float('inf')
+        idx = torch.argmax(scores).item()
         positions = [idx]
-    
+
     keywords = [tokenizer.decode(output_ids[0][idx]).strip() for idx in positions]
-    
+
     return positions, keywords
 
 
